@@ -1,157 +1,120 @@
-# Slop Shield
+# Content Blocker
 
-A Chrome extension that covers likely AI-style filler with white boxes, powered by [Jev](https://docs.typesafe.ai/introduction/quickstart). Click a box to reveal the original text.
+A Chrome extension that filters page text using one personal instruction. Write **“No travel-related content, but allow local news”** in the popup. OpenAI translates your preference into a classification rule, and Jev evaluates passages against that rule. Matching text receives a white cover that you can click to reveal.
 
-- One Jev request per passage, with one `is_slop` question.
-- Persistent score caching across scrolling, page reloads, and browser restarts.
-- Identical passages checked concurrently share a single pending request.
-- Per-site controls and an adjustable detection threshold.
-- A request inspector showing JSON requests, responses, scores, HTTP errors, timing, cache hits, and shared requests.
-- Plain JavaScript, Manifest V3, no runtime dependencies or build step.
+This replaces the previous fixed AI-slop classifier. Nothing is filtered until you save an instruction and enable a site. To block AI-style filler, describe that preference in your instruction.
 
-## Install
+## Install and set up
 
-1. Download the extension ZIP from [Releases](https://github.com/rishiv7/slop-shield/releases/latest) and unzip it.
-2. Open `chrome://extensions` and enable **Developer mode**.
-3. Click **Load unpacked** and select the extracted `slop-shield-chrome` folder containing `manifest.json`.
-4. Pin Slop Shield through Chrome's Extensions menu.
-5. Open **Slop Shield → Settings**, paste your own API key from the [TypeSafe console](https://console.typesafe.ai), and click **Save settings → Test connection**.
-6. Visit a website, open Slop Shield, and enable **Filter this site**. Chrome will ask for access to that site.
+1. Unzip the extension download, or clone this repository.
+2. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
+3. Select the **`extension` folder** containing `manifest.json`.
+4. Open **Content Blocker → Settings**. Enter your **OpenAI API key** and **TypeSafe API key**, then save. Existing TypeSafe keys and site settings are retained when updating the same installation.
+5. Open the popup, enter your instruction, and select **Save & apply**. The active-filter summary describes the generated rule.
+6. Visit a site and turn on **Filter this site** in the popup. Chrome requests access to that site.
 
-Alternatively, clone this repository and load its **`extension` subfolder**, not the repository root. Node.js is needed only to run tests, not to use the extension. This is an unpacked extension, not a Chrome Web Store release.
+The OpenAI key is used to create a new rule. The TypeSafe key is used for Jev content evaluations. Removing the OpenAI key does not stop an already-saved rule from working. Blank key fields preserve saved keys; use each **Remove saved key** button to delete one.
 
-To update an existing installation, replace its extension files, click **Reload** in `chrome://extensions`, then refresh open website tabs. Settings and cached scores are retained when the extension identity and profile stay the same.
+When updating, replace the files in the folder Chrome already loads, click **Reload** in `chrome://extensions`, and refresh website tabs. Version 2 adds access to `api.openai.com`; approve Chrome's permission update if prompted. Upgrading from Slop Shield does not automatically carry forward AI-slop blocking: save your first custom instruction.
 
 ## Controls
 
 | Control | Behavior |
 | --- | --- |
-| Site switch | Enable automatic filtering for the current origin. |
-| Threshold | Hide passages scoring at least this value; default 85/100. |
-| White box | Click, or keyboard-focus and activate, to reveal the text. |
-| Reveal all | Remove covers and pause the current page until rescan or reload. |
-| Rescan page | Reset page scanning and reveal choices; reuse cached scores. |
-| Request log | Inspect recent API exchanges and cache activity. |
+| Your filter | One natural-language instruction, up to 2,000 characters, shared across enabled sites. |
+| Save & apply | Compile with OpenAI and apply to enabled tabs. The previous rule stays active if compilation fails. Saving the unchanged active instruction reuses it. |
+| Clear filter everywhere | Remove the active rule and covers. Site preferences remain saved; no OpenAI request is needed. |
+| Filter this site | Enable or disable the current website's origin. |
+| Confidence threshold | Cover passages scoring at least this value; default 85/100. |
+| White cover | Click, or keyboard-focus and activate, to reveal the text. |
+| Reveal all | Remove covers and pause this page until rescan, reload, or a new rule. |
+| Rescan page | Reset the page's scan budget and reveal choices, reusing scores for the current rule. |
+| Request log | Inspect Jev requests, responses, and individual cache/shared evaluation results. |
 
 ## How it works
 
-There are three main parts: a small script that reads the page, a background worker that manages decisions, and Jev, the external AI service. There is no separate server to deploy.
-
 ```mermaid
 flowchart TD
-    Page[You scroll a website] --> Reader[Page script finds a visible passage]
-    Reader --> Seen{Already checked this text on this element?}
-    Seen -->|Yes| Skip[Keep the existing result]
-    Seen -->|No| Worker[Extension background worker]
-    Worker --> Cache{Have we saved a score for this passage?}
-    Cache -->|Yes| Score[Use the saved score]
-    Cache -->|No| Pending{Is this passage already being evaluated?}
-    Pending -->|Yes| Wait[Share the pending result]
-    Pending -->|No| Jev[Send one passage and one question to Jev]
-    Jev --> Save[Validate and save the score]
-    Save --> Score
-    Wait --> Score
-    Score --> Threshold{Score meets your threshold?}
-    Threshold -->|Yes| Cover[Place a white box over the passage]
-    Threshold -->|No| Keep[Leave the text visible]
+    Input[Save your instruction] --> OpenAI[OpenAI creates a structured rule]
+    OpenAI --> Saved[Validate and save the rule]
+    Saved --> Reset[Remove old covers and reset page scores]
+    Page[Discover loaded page text] --> Memory{Score in page memory?}
+    Memory -->|Yes| Threshold{Matches your threshold?}
+    Memory -->|No| Cache[Look up persistent scores in batches]
+    Cache -->|Hit| Threshold
+    Cache -->|Miss| Jev[Jev evaluates text against your saved rule]
+    Jev --> Persist[Validate and cache score]
+    Persist --> Threshold
+    Threshold -->|Yes| Cover[Inject a clickable white cover]
+    Threshold -->|No| Visible[Leave content visible]
 ```
 
-### Follow a single tweet
+### Instruction compilation
 
-1. **You scroll it into view.** The page script looks for visible text. On X, it recognizes common tweet-text containers. It also supports paragraphs, list items, and quotations on other sites. It reads text that is already on the page; it does not call the X API.
-2. **The script checks whether the text is new.** Unchanged elements already checked on that page are skipped. New text goes to the background worker through Chrome's extension messaging.
-3. **The worker checks its saved scores.** It identifies a passage by its text, not by the temporary HTML element displaying it. If X removes a tweet from the page and recreates it when you scroll back, its cached score can still be reused.
-4. **Only an uncached passage needs Jev.** The worker sends one passage and asks one question: “Is this passage AI-style slop?” If another tab is already asking about the same passage, both tabs share that request.
-5. **Jev returns a score from 0 to 1.** The worker checks that the response is valid, saves the score, and returns it to the page script. Errors leave unclassified text visible and pause the scan until you retry.
-6. **The page script applies your threshold.** At the default setting, a score of 0.85 or higher produces a white box. Click the box to reveal the original text.
+Saving a new instruction sends only that instruction and the compiler prompt to the OpenAI Responses API, using `gpt-4.1-mini`, `store: false`, and a strict JSON schema. The returned summary, classifier instructions, block criteria, and allow criteria are validated before replacing your current rule. Refused, malformed, incomplete, failed, or timed-out results leave the previous rule intact.
 
-### What goes to Jev?
+The compiler is instructed to preserve exceptions and negation: “only show cats” means block content outside that topic, while “no travel except local news” retains the exception. The Jev question includes the original preference and tells the classifier to treat page content as untrusted text, prefer allowing ambiguous passages, and honor exceptions. Model interpretation can still be wrong; inspect the active summary and adjust your instruction as needed.
 
-One HTTP request contains one text passage and one evaluation question. Here is a shortened example; the complete wording lives in [`extension/jev.js`](extension/jev.js).
+Implementation references: [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs) and [GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
 
-```json
-{
-  "model": "jev-latest",
-  "state": "The passage being evaluated...",
-  "questions": {
-    "is_slop": {
-      "type": "noul",
-      "instructions": "Is the passage in state low-value, formulaic AI-style filler?",
-      "criteria": {
-        "true": "Low-information, formulaic filler",
-        "false": "Concrete information, useful details or distinctive insight"
-      }
-    }
-  }
-}
-```
+### Page classification and caching
 
-The background worker sends this directly to TypeSafe's `https://api.typesafe.ai/v1/systemone` endpoint. Your API key is attached to that request by the worker; the page script never receives the key. The score comes back in `answers.is_slop.noul`.
+The page script discovers eligible text throughout the mounted DOM, including off-screen content. Visible and nearby passages are prioritized. It never fetches unloaded tweets or calls a website's private API. Nested tweet text is kept together.
 
-### What is stored, and where?
+Page memory retains up to 10,000 recent text scores after their DOM nodes disappear. Returning tweets can receive covers without another background message. Persistent cache probes run in batches of 64 independently of slow Jev evaluations, and cache hits still work when the new-evaluation budget is exhausted or an API error has paused new requests.
 
-| Information | Location | How long it lasts |
-| --- | --- | --- |
-| Checked page elements and reveal choices | Page script memory | Until the page reloads or its scan is reset |
-| API key, enabled sites, and threshold | Local extension storage | Until changed, cleared, or the extension is removed |
-| Passage fingerprints and scores | Local extension storage | Across reloads and browser restarts; up to 10,000 scores |
-| Recent requests and responses | Extension session storage | Latest 100 events; cleared on browser restart or extension reload |
+Jev receives one passage and one question named `should_block`. The question changes with your saved instruction. A positive score means the text should be blocked. The background worker validates the result before saving it; failed evaluations are not cached.
 
-A **fingerprint** is a hash calculated from the text, model name, and complete evaluation question. The score cache stores this fingerprint and score, not the original passage. The separate request log does contain passage text so you can inspect what happened.
-
-Extra whitespace is normalized before looking up a passage. Identical text can reuse its score across sites and tabs. Changing the threshold or API key does not erase scores. Changing the text or evaluation question creates a new fingerprint and requires a fresh evaluation.
-
-When the cache fills up, older, less recently used entries are removed. A removed entry can require another API call later. Failed evaluations are not saved. If TypeSafe changes the model behind the `jev-latest` name, this version does not automatically expire previously saved scores.
-
-## Request log
-
-Open **Request log** from the extension popup or Settings. Select an event to inspect it.
-
-- **Jev API:** passage, request body, raw response body, HTTP status, elapsed time, score, and errors. Connection tests are included.
-- **Cache hit:** a saved score was reused; no API request was sent.
-- **Shared request:** another evaluation was already pending; no additional request was sent.
-
-Filter events, export JSON, pause recording, or clear the log. Clearing logs does not clear classification scores. Recording is on by default for the browser session. Already-recorded requests may finish updating after recording is paused.
-
-The latest **100 events** are held in trusted extension session storage. They survive worker suspension but clear on browser restart or extension reload. Response previews are capped at **16 KB** and marked when truncated. The authorization header is excluded; the active key is redacted if echoed in a body or error. Historical response bodies cannot be reconstructed from cached scores.
+Persistent scores are keyed by a SHA-256 hash of the complete Jev request: text, model, and compiled rule. Different rules cannot reuse each other's decisions. Changing a rule clears page-memory scores and old covers, cancels old network evaluations, and rejects stale requests. Old persistent scores can only be reused when the complete request matches. Threshold changes reuse scores without recompiling a rule.
 
 ## Data and permissions
 
-- Filtering is off until you enable a site. Only TypeSafe API access is granted at install; website access is requested when enabling a site.
-- Visible passage text goes directly to TypeSafe. API payloads do not include page URLs, cookies, form-field values, or browsing history. Passage text itself can contain private information.
-- Forms, editable areas, navigation, code blocks, and hidden elements are excluded on a best-effort basis. This is not a sensitive-data sanitizer.
-- Your API key is stored in `chrome.storage.local`, restricted to trusted extension contexts. It is not synced or separately encrypted by this extension. Page scripts and content scripts cannot read it.
-- Request logs include actual passage text and site origins locally. Exported logs contain those details. No analytics or automatic log uploads.
-- Turning off a site stops filtering and removes its automatic script registration. Previously granted Chrome host permission remains available for re-enabling; revoke it separately in Chrome if desired.
-- Browser-visible page modifications, including the cover elements, are detectable by the website. This extension does not promise invisibility.
-- API access and charges belong to your TypeSafe account. No key is bundled. See [TypeSafe's privacy policy](https://typesafe.ai/legal/privacy-policy).
+| Information | Where it lives / where it goes |
+| --- | --- |
+| OpenAI and TypeSafe API keys | Trusted extension local storage, not synced; used only by the background worker. |
+| Original instruction and compiled rule | Trusted local extension storage; the instruction goes to OpenAI when compiling, and the compiled rule accompanies Jev evaluations. |
+| Eligible page text | Goes to TypeSafe for uncached evaluations on enabled sites, including off-screen text already loaded. Not sent to OpenAI by this extension. |
+| Recent text and scores | Page memory, up to 10,000 scores; reset on reload or rule change. |
+| Passage fingerprints and scores | Local extension storage, up to 10,000 entries across reloads and browser restarts. |
+| Jev request log | Trusted extension session storage, latest 100 events, cleared on browser restart or extension reload. |
+
+API payloads do not include page URLs, cookies, or form-field values. Passage text can still contain private information. Forms, editable areas, navigation, code, and hidden elements are excluded on a best-effort basis. The extension adds no encryption to locally stored keys and has no analytics or automatic log uploads.
+
+Filtering is off on a website until enabled. Disabling a site removes its automatic script registration; its Chrome host permission remains available for re-enabling unless revoked separately in Chrome.
+
+## Request log
+
+The inspector records Jev request bodies (including your rule), response bodies, scores, status codes, timing, errors, and individual cache/shared results. OpenAI compilation, batch cache probes, and page-memory reuse are not logged individually. Logs contain passage text and site origins locally; exports contain those details. Authorization headers are excluded and the active TypeSafe key is redacted from logged data.
+
+Recording can be paused or cleared independently of cached classification scores. Response previews are limited to 16 KB. In-flight requests may finish updating existing events after recording is paused.
 
 ## Limits
 
-The rubric estimates AI-style filler; it does not establish authorship and has not been accuracy-benchmarked. Every cover is reversible, and original text remains in the DOM.
-
-Passages must be **80–4,000 characters**. Each scan checks up to **120 passages**, with one pending evaluation per page and up to four network evaluations across the extension. A document has an in-memory hourly limit of 360 uncached evaluations; worker restarts reset that guardrail. Requests time out after 20 seconds, with no automatic paid retries. These are usage guardrails, not a provider billing cap.
-
-Images, video, embedded frames, browser pages, Chrome Web Store pages, PDFs, and shadow-root content are outside this version's scope. Unusual layouts can interfere with selection or covers. X-specific behavior has not been validated against live X; browser integration was exercised using controlled fixtures and simulated API responses.
+- Filtering currently covers **text passages**, not entire posts or attached media. Images, video, embedded frames, PDFs, shadow-root content, browser pages, and Chrome Web Store pages are outside its scope.
+- Tweet text may be as short as one character; other page passages must be at least 20 characters. All passages are limited to 4,000 characters. No image, audio, author-profile, or video interpretation is performed.
+- Each scan permits **120 new Jev API evaluations**, with one pending evaluation per page and up to four across the extension. Cached and shared scores do not consume the page budget. Up to 10,000 distinct passages can be queued at once.
+- Each document has an in-memory limit of 360 uncached evaluations per hour; worker restarts reset this guardrail. It is not a provider billing cap.
+- Jev requests time out after 20 seconds. OpenAI compilation times out after 25 seconds. There are no automatic paid retries.
+- Classification is probabilistic. Covers do not remove the underlying DOM text and can be revealed. Unusual website layouts can affect selection and overlay placement.
+- Browser and live-provider validation are left to the user. Automated checks use simulated DOM, Chrome messaging, and API responses only.
 
 ## Development
 
-With Node.js 20 or newer:
+Plain JavaScript, Manifest V3, no runtime dependencies or build step. With Node.js 20 or newer:
 
 ```sh
 npm test
 ```
 
-There are no dependencies to install. The tests cover request shape, response validation, failure handling, persistent caching, duplicate suppression, log retention, redaction, and response capture. They make no paid API calls.
+The tests exercise compiler schemas and failures, Jev requests, settings access, rule-change races, cache isolation, off-screen discovery, recycled nodes, popup drafts, key controls, request logging, and redaction. They do not launch a browser or make paid API calls.
 
 | File | Purpose |
 | --- | --- |
-| `extension/background.js` | API broker, settings, quotas, and site registration |
-| `extension/content.js` | Text selection, dynamic-page observation, and covers |
-| `extension/jev.js` | Single-passage API client and classification rubric |
-| `extension/score-cache.js` | Persistent score cache and pending-request sharing |
-| `extension/request-log.js` | Session logging and response capture |
-| `extension/logs.*` | Request inspector and export controls |
-| `extension/popup.*`, `extension/options.*` | User controls and settings |
-
-Protocol reference: [TypeSafe HTTP API](https://docs.typesafe.ai/api) and [Noul questions](https://docs.typesafe.ai/primitives/noul).
+| `extension/rule-compiler.js` | OpenAI request, structured-output validation, and rule generation |
+| `extension/jev.js` | Jev classifier using the saved custom question |
+| `extension/background.js` | Keys, rules, compilation, API broker, caches, quotas, and site registration |
+| `extension/content.js` | Text discovery, page-memory scores, rule invalidation, and overlays |
+| `extension/score-cache.js` | Persistent scores, batch lookup, and pending-request sharing |
+| `extension/popup.*` | Global instruction editor and current-site controls |
+| `extension/options.*` | Both API keys, threshold, and enabled sites |
+| `extension/request-log.js`, `extension/logs.*` | Jev logging and inspection |

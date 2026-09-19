@@ -37,3 +37,23 @@ test('bounded cache retains recently read entries',async()=>{
  await cache.getOrCompute(key('a'),never);await cache.getOrCompute(key('c'),async()=>.3);
  assert.equal(cache.entries.has(key('b')),false);assert.equal(cache.entries.size,2);
 });
+test('bulk probes preserve order and zero scores without computing misses',async()=>{
+ const storage=store(),cache=new ScoreCache(storage);
+ await cache.getOrCompute(key('zero'),async()=>0);
+ await cache.getOrCompute(key('high'),async()=>.95);
+ const fresh=new ScoreCache(storage);
+ assert.deepEqual(await fresh.getMany([key('high'),key('missing'),key('zero'),key('high')]),[.95,null,0,.95]);
+ assert.equal(fresh.entries.size,2);
+ assert.equal(fresh.pending.size,0);
+});
+test('bulk probes do not wait for pending evaluations and refresh recency',async()=>{
+ const cache=new ScoreCache(store(),2);
+ await cache.getOrCompute(key('a'),async()=>.1);
+ await cache.getOrCompute(key('b'),async()=>.2);
+ let finish;
+ const pending=cache.getOrCompute(key('c'),()=>new Promise(resolve=>{finish=resolve}));
+ assert.deepEqual(await cache.getMany([key('c'),key('a')]),[null,.1]);
+ await Promise.resolve();
+ finish(.3);await pending;
+ assert.deepEqual(await cache.getMany([key('a'),key('b'),key('c')]),[.1,null,.3]);
+});

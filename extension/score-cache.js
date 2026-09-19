@@ -21,6 +21,18 @@ export class ScoreCache {
     }
   }
 
+  // A read-only probe never starts (or waits for) an API evaluation. Returning
+  // null for misses preserves valid zero scores and keeps page-wide probes fast.
+  async getMany(keys) {
+    await this.ready;
+    return keys.map(key => {
+      if (!this.entries.has(key)) return null;
+      const score = this.entries.get(key);
+      this.entries.delete(key); this.entries.set(key, score);
+      return score;
+    });
+  }
+
   async getOrCompute(key, compute, onSource = () => {}) {
     await this.ready;
     if (this.entries.has(key)) {

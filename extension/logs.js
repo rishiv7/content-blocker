@@ -52,6 +52,6 @@ $('record').addEventListener('change', async () => {try {await send({type: 'SET_
 $('clear').addEventListener('click', async () => {try {await send({type: 'CLEAR_LOGS'}); await refresh(); message('Log cleared. Saved classification scores are unchanged.');} catch (e) {message(e.message, true);}});
 $('export').addEventListener('click', () => {
  const blob = new Blob([pretty({exportedAt: new Date().toISOString(), entries})], {type: 'application/json'});
- const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'slop-shield-request-log.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'content-blocker-request-log.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 refresh(); setInterval(refresh, 1000);

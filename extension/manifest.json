@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Slop Shield",
-  "version": "1.2.0",
-  "description": "A quieter internet. Cover likely AI slop with white boxes, powered by Jev.",
+  "name": "Content Blocker",
+  "version": "2.0.0",
+  "description": "Tell us what you want to see less of. OpenAI shapes your rule; Jev filters matching content.",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
@@ -10,7 +10,8 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://api.typesafe.ai/*"
+    "https://api.typesafe.ai/*",
+    "https://api.openai.com/*"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -22,7 +23,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Slop Shield"
+    "default_title": "Content Blocker"
   },
   "options_page": "options.html",
   "icons": {
