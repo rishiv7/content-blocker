@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+.env
+.env.*
+*.pem
+*.key
+slop-shield-request-log*.json
+playwright-report/
+test-results/
+dist/
