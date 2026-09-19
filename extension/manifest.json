@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Content Blocker",
-  "version": "2.0.0",
-  "description": "Tell us what you want to see less of. OpenAI shapes your rule; Jev filters matching content.",
+  "version": "2.1.1",
+  "description": "Tell us what you want to see less of. A TrueForge agent prepares your rule; Jev filters matching content.",
   "minimum_chrome_version": "120",
   "permissions": [
     "storage",
@@ -11,7 +11,7 @@
   ],
   "host_permissions": [
     "https://api.typesafe.ai/*",
-    "https://api.openai.com/*"
+    "http://localhost:8790/*"
   ],
   "optional_host_permissions": [
     "https://*/*",

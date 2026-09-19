@@ -7,6 +7,7 @@
   let config = {enabled: false, configured: false, threshold: .85, limit: 120, filterId: null};
   let epoch = 0, configRequest = 0, busy = false, lookupBusy = false, error = '', timer, observer, paused = false, checked = 0, evaluated = 0;
   const records = new Map(), scores = new Map(), probed = new Map(), pending = new Map();
+  const covers = new Map();
   const lookupPending = new Map(), lookupQueue = new Set(), checkedTexts = new Map();
   const send = async m => { const r = await chrome.runtime.sendMessage(m); if (r?.error) throw new Error(r.error); return r; };
   const textOf = node => (node.innerText || '').replace(/\s+/g, ' ').trim();
@@ -25,57 +26,81 @@
     return r.width > 30 && r.height > 12;
   };
   const valid = (node, text) => eligible(node) && textOf(node) === text;
+  // A flagged tweet covers its whole article, including attached images and
+  // quoted content. Other page passages keep their individual text covers.
+  const targetOf = node => node.matches('[data-testid="tweetText"]')
+    ? node.closest('article') || node : node;
   const distance = node => {
     const r = node.getBoundingClientRect();
     return Math.max(0, r.top - innerHeight, -r.bottom) + Math.max(0, r.left - innerWidth, -r.right);
   };
   const status = () => ({enabled: config.enabled, configured: config.configured, busy, error, paused, checked,
-    evaluated, covered: [...records.values()].filter(r => r.host && r.node.isConnected).length,
+    evaluated, covered: [...covers.values()].filter(c => c.node.isConnected).length,
     limit: evaluated >= config.limit});
   const markChecked = text => {
     if (!checkedTexts.has(text)) checked++;
     remember(checkedTexts, text, true);
   };
 
-  function uncover(record) {
-    record.host?.remove(); record.host = null;
-    if (record.position && record.node.style.position === 'relative') {
-      if (record.position.value) record.node.style.setProperty('position', record.position.value, record.position.priority);
-      else record.node.style.removeProperty('position');
+  function removeCover(group) {
+    group.host.remove();
+    if (group.position && group.node.style.position === 'relative') {
+      if (group.position.value) group.node.style.setProperty('position', group.position.value, group.position.priority);
+      else group.node.style.removeProperty('position');
     }
-    record.position = null;
+    for (const record of group.records) record.group = null;
+    covers.delete(group.node);
+  }
+  function uncover(record) {
+    const group = record.group;
+    if (!group) return;
+    record.group = null;
+    group.records.delete(record);
+    if (!group.records.size) removeCover(group);
   }
   function cover(record) {
-    if (record.host || record.revealed || record.score < config.threshold || !active() || !valid(record.node, record.text)) return;
-    const node = record.node;
+    if (record.group || record.revealed || record.score < config.threshold || !active() || !valid(record.node, record.text)) return;
+    const node = targetOf(record.node);
+    let group = covers.get(node);
+    if (group) {
+      group.records.add(record); record.group = group; return;
+    }
+    group = {node, records: new Set([record]), position: null, host: null};
     if (getComputedStyle(node).position === 'static') {
-      record.position = {value: node.style.getPropertyValue('position'), priority: node.style.getPropertyPriority('position')};
+      group.position = {value: node.style.getPropertyValue('position'), priority: node.style.getPropertyPriority('position')};
       node.style.setProperty('position', 'relative', 'important');
     }
     const host = document.createElement('span');
     host.dataset.slopShield = 'cover';
-    host.style.cssText = 'all:initial!important;position:absolute!important;inset:0!important;display:block!important;z-index:2!important;background:#fff!important;border-radius:4px!important;min-height:0!important;box-sizing:border-box!important;';
+    host.style.cssText = 'all:initial!important;position:absolute!important;inset:0!important;display:block!important;z-index:2147483647!important;background:#fff!important;border-radius:4px!important;min-height:0!important;box-sizing:border-box!important;';
     const shadow = host.attachShadow({mode: 'closed'});
     const style = document.createElement('style');
     style.textContent = `:host{color-scheme:light}button{appearance:none;box-sizing:border-box;position:absolute;inset:0;width:100%;height:100%;background:#fff;color:#656760;border:1px solid #e6e7e1;border-radius:4px;display:flex;align-items:center;justify-content:center;gap:9px;font:11px/1.3 system-ui,sans-serif;letter-spacing:.02em;cursor:pointer;overflow:hidden;padding:3px 8px}button:hover{border-color:#b3b7a9;color:#292c23}button:focus-visible{outline:3px solid #57743b;outline-offset:2px}.dot{width:6px;height:6px;background:#a8b79a;border-radius:50%;flex-shrink:0}small{font:inherit;color:#91948a}`;
     const button = document.createElement('button');
     button.type = 'button';
-    button.setAttribute('aria-label', `Reveal content matching your filter. Match score ${Math.round(record.score * 100)} out of 100.`);
+    button.setAttribute('aria-label', `Reveal ${node !== record.node ? 'tweet and attached images' : 'content'} matching your filter. Match score ${Math.round(record.score * 100)} out of 100.`);
     button.title = 'Click to reveal. Content matches can be wrong.';
     const dot = document.createElement('span'); dot.className = 'dot';
     const label = document.createElement('span'); label.textContent = 'Hidden by your filter';
     const hint = document.createElement('small'); hint.textContent = '· reveal';
     button.append(dot, label, hint);
-    button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); record.revealed = true; uncover(record); });
+    button.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation();
+      // Multiple flagged passages in a tweet share one cover and reveal action.
+      for (const item of records.values()) if (targetOf(item.node) === node) item.revealed = true;
+      removeCover(group);
+    });
     shadow.append(style, button);
-    record.host = host;
+    group.host = host; record.group = group; covers.set(node, group);
     node.append(host);
   }
   function clean() {
     for (const [node, record] of records) {
       if (!valid(node, record.text)) { uncover(record); records.delete(node); }
-      else if (record.host && record.host.parentElement !== node) {
-        record.host = null; cover(record);
+      else {
+        if (record.group && record.group.host.parentElement !== record.group.node) removeCover(record.group);
+        if (record.group && record.group.node !== targetOf(node)) uncover(record);
+        cover(record);
       }
     }
   }
@@ -84,7 +109,7 @@
     let record = records.get(node);
     if (record?.text === text) return;
     if (record) uncover(record);
-    record = {node, text, score, revealed: false, host: null, position: null};
+    record = {node, text, score, revealed: false, group: null};
     records.set(node, record);
     markChecked(text);
     cover(record);
