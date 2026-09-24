@@ -1,9 +1,10 @@
 import {detect, buildRequest, normalizePassage, normalizeQuestion, MODEL} from './jev.js';
-import {compileInstruction, normalizeInstruction, COMPILER_VERSION} from './rule-compiler.js';
+import {compileInstruction, normalizeInstruction, checkCompiler} from './rule-compiler.js';
+import {COMPILER_VERSION, COMPILER_AGENT, TRUEFORGE_URL} from './compiler-agent.js';
 import {ScoreCache} from './score-cache.js';
 import {RequestLog, redact, responsePreview} from './request-log.js';
 
-const defaults = {apiKey: '', openaiApiKey: '', filter: null, threshold: 0.85, sites: [], shortForm: false};
+const defaults = {apiKey: '', filter: null, threshold: 0.85, sites: [], shortForm: false};
 const ready = chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const sessionReady = chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const log = new RequestLog({
@@ -31,7 +32,7 @@ const read = async () => {
   }
   return s;
 };
-const publicSettings = s => ({configured: !!s.apiKey, openaiConfigured: !!s.openaiApiKey,
+const publicSettings = s => ({configured: !!s.apiKey, compilerAgent: COMPILER_AGENT, compilerUrl: TRUEFORGE_URL,
   filterReady: !!s.filter, instruction: s.filter?.instruction || '', filterSummary: s.filter?.summary || '',
   filterId: s.filter?.id || null, threshold: s.threshold, sites: s.sites, shortForm: !!s.shortForm});
 const publicConfig = (s, origin) => ({configured: !!s.apiKey && !!s.filter, threshold: s.threshold,
@@ -139,9 +140,8 @@ async function saveInstruction(message) {
     }
     if (s.filter?.instruction === instruction && s.filter.compilerVersion === COMPILER_VERSION) return {ok: true, instruction,
       filterSummary: s.filter.summary, filterId: s.filter.id};
-    if (!s.openaiApiKey) throw new Error('Add an OpenAI API key in Settings to save a new filter.');
     timer = setTimeout(() => controller.abort(), 25000);
-    const compiled = await compileInstruction(instruction, s.openaiApiKey, {signal: controller.signal});
+    const compiled = await compileInstruction(instruction, controller.signal);
     current();
     const question = normalizeQuestion(compiled.question);
     const filter = {...compiled, compilerVersion: COMPILER_VERSION, question, id: await hash(JSON.stringify({model: MODEL, instruction, question}))};
@@ -149,7 +149,7 @@ async function saveInstruction(message) {
     return {ok: true, instruction, filterSummary: filter.summary, filterId: filter.id};
   } catch (error) {
     if (controller.signal.aborted && version === instructionRevision) {
-      throw new Error('OpenAI took too long to prepare your instruction. Your previous rule is unchanged. Try again.');
+      throw new Error('TrueForge took too long to prepare your instruction. Your previous rule is unchanged. Try again.');
     }
     if (version !== instructionRevision) throw new Error('Instruction update cancelled by a newer change.');
     throw error;
@@ -222,7 +222,7 @@ async function handle(m, sender) {
   if (m.type === 'SAVE_SETTINGS') {
     if (!Number.isFinite(m.threshold) || m.threshold < 0.5 || m.threshold > 0.99) throw new Error('Choose a threshold between 50 and 99.');
     const update = {threshold: m.threshold};
-    for (const key of ['apiKey', 'openaiApiKey']) {
+    for (const key of ['apiKey']) {
       if (m[key] === undefined) continue;
       if (typeof m[key] !== 'string' || m[key].length > 1024 || /\s/.test(m[key])) throw new Error('Enter a valid API key without whitespace.');
       update[key] = m[key];
@@ -231,7 +231,6 @@ async function handle(m, sender) {
       if (typeof m.shortForm !== 'boolean') throw new Error('Invalid short-form setting.');
       update.shortForm = m.shortForm;
     }
-    if (update.openaiApiKey !== undefined && update.openaiApiKey !== s.openaiApiKey) cancelCompilation();
     await persistSettings(update); return {ok: true};
   }
   if (m.type === 'SET_SITE') {
@@ -249,6 +248,7 @@ async function handle(m, sender) {
     }
     return {ok: true};
   }
+  if (m.type === 'TEST_COMPILER') return checkCompiler();
   if (m.type === 'TEST') {
     if (!s.filter) throw new Error('Save a blocking instruction in the popup before testing Jev.');
     await loggedDetect('The library opens at nine on weekdays. To renew a book, bring your library card to the front desk before the due date.', s.filter.question, s.apiKey, AbortSignal.timeout(20000), {origin: 'Connection test'});
