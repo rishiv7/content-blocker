@@ -1,10 +1,14 @@
 # Short-form blocking — integration verification record
 
-Sweep date: 2026-09-24 · Branch: `feat/short-form-integration` (release branch + #10 engine merged ff + #6 popup merged) · Spec: approved blueprint `art_wy13pFy7`.
+Sweep date: 2026-09-24 · Branch: `feat/short-form-integration` (release branch + #10 engine merged ff + #6 popup merged + release base 480c39a folded in) · Spec: approved blueprint `art_wy13pFy7`.
+
+## Base-move fold (2026-09-24, post-initial sweep)
+
+The release base moved: `480c39a` merged main's `e227ff1` (revert of the direct gpt-6-luna compiler) into the release branch, restoring the TrueForge compiler stack. The fold was merged into this branch and resolved with both intents kept: the revert's TrueForge state (README section, `compilerAgent` mock key, `test-openai.mjs` removed, localhost:8790 host permission) plus all short-form work and docs. One test baseline changed: the criterion-9 manifest guard now asserts the reverted host-permission set (`https://api.typesafe.ai/*`, `http://localhost:8790/*`) — its intent (the short-form work adds zero permissions) is unchanged. `extension/short-form.js` is byte-identical across the fold (sha256 `a1b190d5d5611d9389f7012f4eb1da7cb61633ba71079517cf68f10428950622`), so all live/fixture captures below describe the same engine bytes; they were re-attested against the resolved head.
 
 ## Suite
 
-- Full suite on Node v22.14.0 (`node --test tests/*.test.js`): **86/86 passing** — 9 pre-existing files unmodified, plus `short-form-settings.test.js` (#4), `short-form-engine.test.js` (#10), and the popup round-trip additions in `ui.test.js` (#6).
+- Full suite on Node v22.14.0 (`node --test tests/*.test.js`) at the resolved head `154b279`: **84/84 passing**. The count moved 86 → 84 because the revert removed the two compiler-era test cases, not because of short-form work; all nine pre-existing files otherwise unmodified, plus `short-form-settings.test.js` (#4), `short-form-engine.test.js` (#10), and the popup round-trip additions in `ui.test.js` (#6).
 - Environment note: the repo requires Node ≥ 22.14 (`engines`); under Node 20 the jsdom → undici import fails (`markAsUncloneable`), which is a toolchain mismatch, not a code failure. Verified both ways in the sweep sandbox.
 
 ## Integrated flow (popup toggle → broadcast → suppression)
@@ -21,7 +25,7 @@ The popup persists `shortForm` via `SAVE_SETTINGS`; the worker broadcasts `CONFI
 | 6 — Mode off → zero artifacts | LIVE PASS: after `CONFIG_CHANGED {shortForm:false}` — style element gone, both scope attributes null, chip gone, native `history.pushState` restored (`pushRestored: true`) | `tc-4-toggle-off-after.png` |
 | 7 — `SET_SITE` keyless when short-form on; today's errors when off | PASS — `tests/short-form-settings.test.js` (merged with #4) | suite |
 | 8 — `shortForm` validation + config broadcast | PASS — `tests/short-form-settings.test.js`, `tests/ui.test.js` round-trip | suite |
-| 9 — No permission changes; manifest gains only the registration | PASS — full-branch diff `5e35c3a..HEAD` on `extension/manifest.json` is exactly the one `content_scripts` block; permissions/host_permissions/optional_host_permissions untouched; the only `declarativeNetRequest` string in the branch diff is the test asserting its absence | this record |
+| 9 — No permission changes; manifest gains only the registration | PASS — full-branch diff `5e35c3a..HEAD` on `extension/manifest.json` is exactly the one `content_scripts` block; permissions/host_permissions/optional_host_permissions untouched by the short-form work (the revert's localhost:8790 baseline is asserted as-is); the only `declarativeNetRequest` string in the branch diff is the test asserting its absence | this record |
 
 Fixture-rendered visuals (`tc-5-fixture-*.png`) apply the engine's `stylesheet()` output verbatim (extracted at `a1b190d5`) to synthetic DOM mirroring the test fixtures — clearly labeled, not presented as live-site captures. Fail-visible status: TikTok and Facebook SURFACES rows are marked unverified (2026-09-24); a selector miss on those surfaces hides nothing.
 
