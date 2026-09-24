@@ -26,7 +26,9 @@
       // hosts; ytd-shorts is the whole Shorts view root (slide, metadata,
       // swipe peek and stage backdrop) and exists only on Shorts routes, so
       // page mode hides it outright. Masthead and guide sit outside it.
-      pagePath: /^\/shorts\/[^/?]+/,
+      // /shorts/ without an id is the Shorts feed route — the same surface,
+      // so page mode covers it too.
+      pagePath: /^\/shorts(\/|$)/,
       pageHide: 'ytd-player, #player, ytd-short-player, ytd-reel-video-renderer, ytd-shorts',
       items: [
         // Verified 2026-09-24 on search results: lockups are the present-day

@@ -83,6 +83,15 @@ test('criterion 1: hard /shorts/ load hides the media region, stops the video, a
   assert.ok(!css.includes('ytd-masthead') && !css.includes('#guide'), 'site chrome is never matched');
 });
 
+test('the bare /shorts/ feed route is page mode too', async t => {
+  const h = await engine({
+    url: 'https://www.youtube.com/shorts/',
+    body: '<ytd-reel-video-renderer><video autoplay></video></ytd-reel-video-renderer>',
+  });
+  assert.equal(h.flags().page, 'youtube', 'the feed route engages page mode');
+  await h.waitFor(() => h.stopped(h.document.querySelector('video')));
+});
+
 test('criterion 2: all three YouTube shelf candidates suppress, and an ordinary feed item stays visible', async t => {
   const h = await engine({
     url: 'https://www.youtube.com/',
