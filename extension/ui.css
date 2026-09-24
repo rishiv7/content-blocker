@@ -20,3 +20,7 @@
 .site-card .stats strong{font-size:24px}
 .settings .remove-key{display:block;margin:-7px 0 22px}
 .settings .key-row+.field-help{margin-bottom:11px}
+/* Short-form video toggle */
+.short-form{display:flex;align-items:center;gap:9px;border-top:1px solid var(--line);margin-top:13px;padding-top:12px}
+.short-form input{width:15px;height:15px;margin:0;accent-color:var(--green);flex-shrink:0;cursor:pointer}
+.short-form label{margin:0;cursor:pointer}

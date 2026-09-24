@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let tab, origin, settings, working = false, saving = false, draftDirty = false, refreshBusy = false, refreshRevision = 0;
+let tab, origin, settings, working = false, saving = false, draftDirty = false, refreshBusy = false, refreshRevision = 0, shortFormBusy = false;
 const send = async m => { const r = await chrome.runtime.sendMessage(m); if (r.error) throw new Error(r.error); return r; };
 function message(id, text, error = false) { $(id).textContent = text; $(id).classList.toggle('error', error); }
 function updateCount() { $('count').textContent = `${$('instruction').value.length} / 2000`; }
@@ -20,6 +20,8 @@ async function refresh() {
     const s = await send({type: 'GET_SETTINGS'});
     if (version !== refreshRevision) return;
     settings = s; showRule(s);
+    // Polling must not snap the checkbox back while its own save is in flight.
+    if (!shortFormBusy) $('short-form').checked = !!s.shortForm;
     const enabled = !!origin && s.sites.includes(origin);
     $('toggle').disabled = !origin || working || (!enabled && (!s.configured || !s.filterReady));
     $('toggle').setAttribute('aria-checked', String(enabled));
@@ -74,6 +76,16 @@ $('toggle').addEventListener('click', async () => {
     await send({type: 'SET_SITE', origin, enabled, tabId: tab.id});
   } catch (e) { message('message', e.message, true); }
   finally { working = false; await refresh().catch(e => message('message', e.message, true)); }
+});
+$('short-form').addEventListener('change', async () => {
+  if (shortFormBusy || !settings) return;
+  shortFormBusy = true; $('short-form').disabled = true; message('message', '');
+  try {
+    // The threshold rides along because SAVE_SETTINGS validates it as one payload.
+    await send({type: 'SAVE_SETTINGS', threshold: settings.threshold, shortForm: $('short-form').checked});
+    await refresh();
+  } catch (e) { $('short-form').checked = !!settings.shortForm; message('message', e.message, true); }
+  finally { shortFormBusy = false; $('short-form').disabled = false; }
 });
 for (const [id, type] of [['rescan', 'RESCAN'], ['reveal', 'REVEAL_ALL']]) $(id).addEventListener('click', async () => {
   try { message('message', ''); await chrome.tabs.sendMessage(tab.id, {type}); await refresh(); }
