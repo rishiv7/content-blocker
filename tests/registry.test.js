@@ -59,15 +59,20 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
     assert.equal(typeof adaptor.minText, 'function');
     assert.equal(typeof adaptor.eligible, 'function');
     assert.equal(typeof adaptor.container, 'string');
-    // Reserved hooks stay unset on site adaptors: no dialog opt-in, no extra
-    // roots, no observation overrides.
+    // No adaptor carries budget-shaped configuration, a dialog opt-in, or an
+    // observation override.
     assert.equal(adaptor.dialogOptIn, undefined);
-    assert.equal(adaptor.roots, undefined);
     assert.equal(adaptor.observe, undefined);
-    // No adaptor carries budget-shaped configuration.
-    assert.deepEqual(Object.keys(adaptor).sort(),
-      ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'targetOf']);
   }
+  // X keeps every reserved hook unset.
+  assert.equal(xAdaptor.roots, undefined);
+  assert.deepEqual(Object.keys(xAdaptor).sort(),
+    ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'targetOf']);
+  // The reddit adaptor consumes the reserved roots hook: shreddit discovery
+  // scans every reachable open shadow root.
+  assert.equal(typeof redditAdaptor.roots, 'function');
+  assert.deepEqual(Object.keys(redditAdaptor).sort(),
+    ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'roots', 'targetOf']);
   // The generic adaptor opts into open-shadow traversal through the roots
   // hook (the universal engine); dialog neutrality is expressed by its
   // exclusion list, not a hook.
@@ -78,13 +83,17 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
     ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'roots', 'targetOf']);
 });
 
-test('site adaptors carry the shipped selector and exclusion sets verbatim', () => {
+test('x and generic carry the shipped sets verbatim; reddit gains shreddit boundaries', () => {
   const shipped = 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]';
   const shippedExclude = 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]';
-  for (const adaptor of [xAdaptor, redditAdaptor]) {
-    assert.equal(adaptor.candidates, shipped);
-    assert.equal(adaptor.exclude, shippedExclude);
-  }
+  assert.equal(xAdaptor.candidates, shipped);
+  assert.equal(xAdaptor.exclude, shippedExclude);
+  // The reddit coverage PR curates the candidate set for this origin: the
+  // old-UI prose selectors stay, the tweet-shaped hooks drop, and shreddit's
+  // stable slots (detail title, comment body) join. The exclusion set stays
+  // shipped verbatim.
+  assert.equal(redditAdaptor.candidates, 'p, li, blockquote, .md > div, div[dir="auto"], h1[slot="title"], div[slot="comment"]');
+  assert.equal(redditAdaptor.exclude, shippedExclude);
   // The universal engine evolves the generic adaptor only: the shipped
   // candidate set stays, and the blanket [role="dialog"] exclusion is dropped
   // (neutral dialog policy) while every structural chrome exclusion remains.

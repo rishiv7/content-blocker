@@ -56,18 +56,45 @@
   const redditAdaptor = {
     id: 'reddit',
     matches: h => h === 'reddit.com' || h.endsWith('.reddit.com'),
-    candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
+    // Old-UI prose selectors (p, li, blockquote, .md > div, div[dir="auto"])
+    // keep the shipped coverage; shreddit boundaries ride stable slots: the
+    // post-detail title (h1[slot="title"]) and one candidate per comment body
+    // (div[slot="comment"], grouped by the container hook). The shipped
+    // tweet-shaped hooks are dropped — dead weight on this origin.
+    candidates: 'p, li, blockquote, .md > div, div[dir="auto"], h1[slot="title"], div[slot="comment"]',
+    // Shipped exclusion set verbatim: interface chrome stays excluded
+    // structurally and dialogs stay excluded on this origin.
     exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
-    // A flagged tweet covers its whole article, including attached images and
-    // quoted content. Other page passages keep their individual text covers.
-    targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
-    // Topic preferences can match short tweets; generic page fragments still
-    // need enough text to avoid spending requests on tiny interface labels.
-    minText: node => node.matches('[data-testid="tweetText"]') ? 1 : 20,
-    // Shipped media policy: a candidate holding interactive or media
-    // descendants is never scored on its own.
-    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
-    container: '[data-testid="tweetText"]'
+    // Old-UI link-post titles flag as their title link (a.title), so the cover
+    // overlays the title text rather than the flair and domain noise in the
+    // p.title paragraph. Media-only posts (no .md selftext) flag as the post's
+    // media container — expanded expando media when present, else the
+    // thumbnail — so flagging the title hides the media. Everything else keeps
+    // a per-passage cover.
+    targetOf: node => {
+      if (!node.matches('p.title')) return node;
+      const post = node.closest('.thing');
+      if (!post || post.querySelector('.md')) return node.querySelector('a.title') || node;
+      const expanded = post.querySelector('.expando img, .expando video') ? post.querySelector('.expando') : null;
+      return expanded || post.querySelector('a.thumbnail') || node.querySelector('a.title') || node;
+    },
+    // Titles are primary content: topic preferences can match short ones, the
+    // way short tweets can. Generic page fragments still need enough text to
+    // avoid spending requests on tiny interface labels.
+    minText: node => node.matches('p.title, h1[slot="title"]') ? 1 : 20,
+    // Media policy: reddit prose routinely carries inline images and embeds
+    // (selftext, comment bodies), and the shipped policy dropped any candidate
+    // holding media wholesale. Only interactive form controls disqualify a
+    // candidate now.
+    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"])'),
+    // One candidate per shreddit comment body: inner paragraphs collapse into
+    // the slot wrapper instead of spending an evaluation each.
+    container: 'div[slot="comment"]',
+    // shreddit opt-in: discovery also scans every reachable OPEN shadow root
+    // (async-loader hydrated components, embedded surfaces); closed roots are
+    // unreachable by design. Reuses the inline traversal copy above, which
+    // mirrors the canonical collectRoots in extension/adaptors/roots.js.
+    roots: collectRoots
   };
   // TODO: linkedin adaptor arrives with the LinkedIn PR; linkedin.com is
   // served by the generic adaptor until then.
