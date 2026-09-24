@@ -21,6 +21,18 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "https://*.tiktok.com/*",
+        "https://*.instagram.com/*",
+        "https://*.facebook.com/*"
+      ],
+      "js": ["short-form.js"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Content Blocker"

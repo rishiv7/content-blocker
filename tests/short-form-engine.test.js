@@ -240,3 +240,16 @@ test('re-injection is idempotent', async t => {
   await new Promise(resolve => setTimeout(resolve, 120));
   assert.equal(h.requests.length, 1, 'the second copy never runs');
 });
+
+test('criterion 9: the manifest gains only the short-form registration and zero permissions', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.content_scripts, [{
+    matches: ['https://*.youtube.com/*', 'https://*.tiktok.com/*', 'https://*.instagram.com/*', 'https://*.facebook.com/*'],
+    js: ['short-form.js'],
+    run_at: 'document_start',
+  }]);
+  assert.deepEqual(manifest.permissions, ['storage', 'activeTab', 'scripting']);
+  assert.deepEqual(manifest.host_permissions, ['https://api.typesafe.ai/*', 'https://api.openai.com/*']);
+  assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://*/*']);
+  assert.ok(!JSON.stringify(manifest).includes('declarativeNetRequest'));
+});
