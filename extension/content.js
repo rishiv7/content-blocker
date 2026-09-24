@@ -20,20 +20,32 @@
     eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
     container: '[data-testid="tweetText"]'
   };
+  // X adaptor: mirrors extension/adaptors/x.js (kept honest by the mirror
+  // audit in tests/registry.test.js). Dialog opt-in: modal captions are
+  // first-class candidates; interface chrome stays excluded structurally.
   const xAdaptor = {
     id: 'x',
     matches: h => h === 'x.com' || h === 'twitter.com' || h.endsWith('.x.com') || h.endsWith('.twitter.com'),
     candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
-    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
-    // A flagged tweet covers its whole article, including attached images and
-    // quoted content. Other page passages keep their individual text covers.
-    targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // Inside a dialog the cover overlays the flagged caption itself; outside,
+    // flagged tweet text covers its whole article (shipped, pinned). Media-only
+    // candidates map to their media container.
+    targetOf: node => {
+      if (node.closest('[role="dialog"]')) return node;
+      if (node.matches('[data-testid="tweetText"]')) return node.closest('article') || node;
+      const media = node.querySelector('img, video, iframe');
+      if (media && !(node.innerText || '').trim())
+        return media.closest('[data-testid="tweetPhoto"], [data-testid="videoPlayer"]') || media;
+      return node;
+    },
     // Topic preferences can match short tweets; generic page fragments still
     // need enough text to avoid spending requests on tiny interface labels.
     minText: node => node.matches('[data-testid="tweetText"]') ? 1 : 20,
-    // Shipped media policy: a candidate holding interactive or media
-    // descendants is never scored on its own.
-    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
+    // Media policy: media descendants no longer disqualify a passage — a
+    // media-bearing tweet is scored on its text instead of being skipped.
+    // Interactive controls still disqualify.
+    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"])'),
     container: '[data-testid="tweetText"]'
   };
   const redditAdaptor = {

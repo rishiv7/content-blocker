@@ -70,13 +70,17 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
   }
 });
 
-test('site adaptors carry the shipped selector and exclusion sets verbatim', () => {
+test('reddit and generic carry the shipped sets verbatim; X opts into dialog coverage', () => {
   const shipped = 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]';
   const shippedExclude = 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]';
-  for (const adaptor of Object.values(modules)) {
+  for (const adaptor of [modules.reddit, modules.generic]) {
     assert.equal(adaptor.candidates, shipped);
     assert.equal(adaptor.exclude, shippedExclude);
   }
+  // The X coverage PR opts X into dialog coverage: the blanket dialog
+  // exclusion is dropped there, and every other shipped exclusion stays.
+  assert.equal(xAdaptor.candidates, shipped);
+  assert.equal(xAdaptor.exclude, shippedExclude.replace('[role="dialog"], ', ''));
 });
 
 // content.js is injected as a classic script, so it cannot import the adaptor
