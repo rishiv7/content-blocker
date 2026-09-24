@@ -11,7 +11,7 @@ class Control {
   replaceChildren(...children) { this.children = children; }
 }
 const initial = {configured: true, compilerAgent: 'content-blocker-compiler', filterReady: true, instruction: 'No travel',
-  filterSummary: 'Hide travel content', filterId: 'one', threshold: .85, sites: ['https://example.com']};
+  filterSummary: 'Hide travel content', filterId: 'one', threshold: .85, sites: ['https://example.com'], shortForm: false};
 async function fixture(name = 'popup', overrides = {}) {
   const [html, source] = await Promise.all(['html', 'js'].map(ext => readFile(new URL(`../extension/${name}.${ext}`, import.meta.url), 'utf8')));
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
@@ -34,6 +34,7 @@ async function fixture(name = 'popup', overrides = {}) {
           settings.threshold = m.threshold;
           if (m.apiKey !== undefined) settings.configured = !!m.apiKey;
           if (m.openaiApiKey !== undefined) settings.openaiConfigured = !!m.openaiApiKey;
+          if (m.shortForm !== undefined) settings.shortForm = m.shortForm;
         }
         return {ok: true};
       }},
@@ -107,4 +108,48 @@ test('settings submits keys only when entered, preserves saved keys on blank fie
   await c['remove-key'].events.click();
   assert.equal(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1).apiKey, '');
   assert.equal(c.test.disabled, true, 'Jev testing needs the TypeSafe key');
+});
+test('short-form toggle round-trips through SAVE_SETTINGS and reflects saved state', async () => {
+  const h = await fixture('popup', {shortForm: true}), c = h.controls;
+  assert.equal(c['short-form'].checked, true, 'the saved mode is reflected on popup open');
+  c['short-form'].checked = false;
+  await c['short-form'].events.change();
+  assert.deepEqual(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1), {type: 'SAVE_SETTINGS', threshold: .85, shortForm: false}, 'the current threshold rides along with the mode');
+  assert.equal(c['short-form'].checked, false, 'the stored state holds after the save');
+  c['short-form'].checked = true;
+  await c['short-form'].events.change();
+  assert.deepEqual(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1).shortForm, true);
+  assert.equal(h.settings.shortForm, true, 'the fixture stored the new mode');
+});
+test('an in-flight short-form save is not overwritten by polling', async () => {
+  const h = await fixture('popup'), c = h.controls;
+  let resolve;
+  h.hooks.SAVE_SETTINGS = () => new Promise(done => { resolve = done; });
+  c['short-form'].checked = true;
+  const saving = c['short-form'].events.change();
+  assert.equal(c['short-form'].disabled, true, 'the checkbox locks while saving');
+  await h.refresh();
+  assert.equal(c['short-form'].checked, true, 'the 1s poll keeps the in-flight state');
+  Object.assign(h.settings, {shortForm: true});
+  resolve({ok: true}); await saving; await h.refresh();
+  assert.equal(c['short-form'].disabled, false, 'the checkbox unlocks after the save');
+  assert.equal(c['short-form'].checked, true);
+});
+test('status line names the deterministic mode when no filter exists', async () => {
+  const noFilter = {filterReady: false, instruction: '', filterId: null, filterSummary: ''};
+  const h = await fixture('popup', {...noFilter, shortForm: true}), c = h.controls;
+  assert.equal(c.status.textContent, 'Blocking short-form video');
+  const withoutMode = await fixture('popup', noFilter);
+  assert.equal(withoutMode.controls.status.textContent, 'Save a filter to start');
+  const withFilter = await fixture('popup', {shortForm: true});
+  assert.equal(withFilter.controls.status.textContent, 'Filtering this site');
+});
+test('short-form mode relaxes the site gate without touching today\'s gates', async () => {
+  const gated = {configured: false, openaiConfigured: false, filterReady: false, sites: []};
+  const h = await fixture('popup', {...gated, shortForm: true}), c = h.controls;
+  assert.equal(c.toggle.disabled, false, 'a site can be enabled with no key and no rule');
+  assert.equal(c.status.textContent, 'Off on this site');
+  const today = await fixture('popup', gated);
+  assert.equal(today.controls.toggle.disabled, true, 'short-form off: today\'s gate stands');
+  assert.equal(today.controls.status.textContent, 'Add a TypeSafe key in Settings');
 });

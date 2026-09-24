@@ -25,6 +25,7 @@ When updating, replace the files in the folder Chrome already loads, click **Rel
 | Save & apply | Compile with TrueForge and apply to enabled tabs. The previous rule stays active if compilation fails. Saving the unchanged active instruction reuses it. |
 | Clear filter everywhere | Remove the active rule and covers. Site preferences remain saved; no agent request is needed. |
 | Filter this site | Enable or disable the current website's origin. |
+| Block short-form video | Deterministically suppress YouTube Shorts, TikTok, and Instagram/Facebook Reels on enabled sites. Needs no API key or filter. |
 | Confidence threshold | Cover passages scoring at least this value; default 85/100. |
 | White cover | Click, or keyboard-focus and activate, to reveal. A tweet cover reveals its text and attached images together. |
 | Reveal all | Remove covers and pause this page until rescan, reload, or a new rule. |
@@ -71,6 +72,19 @@ Jev receives one passage and one question named `should_block`. The question cha
 
 Persistent scores are keyed by a SHA-256 hash of the complete Jev request: text, model, and compiled rule. Different rules cannot reuse each other's decisions. Changing a rule clears page-memory scores and old covers, cancels old network evaluations, and rejects stale requests. Old persistent scores can only be reused when the complete request matches. Threshold changes reuse scores without recompiling a rule.
 
+### Short-form video blocking
+
+A global **Block short-form video** toggle in the popup enables a deterministic suppression layer for YouTube Shorts, TikTok, and Instagram/Facebook Reels on enabled sites. It is separate from the text pipeline: no TypeSafe key, no Jev request, no classification — everything is DOM and URL logic in `extension/short-form.js`, registered at `document_start` so suppression exists before the first paint of a hard navigation.
+
+Two modes per site, driven by one SURFACES table in the engine:
+
+- **Page mode** — the route itself is short-form (`youtube.com/shorts/<id>`, `instagram.com/reels/…`, `facebook.com/reel/<id>`, TikTok's home feed). A scope attribute on `<html>` hides the media region while the header and navigation stay visible, and a small inert "Short-form video blocked" placeholder appears. There is no reveal control for video.
+- **Item mode** — in-feed elements that link to short-form content collapse to the same inert chip. Anchoring prefers the item's own link path (`/shorts/`, `/video/`, `/reels`, `/reel/`) over volatile class names, so ordinary results and posts stay visible.
+
+Inside suppressed regions every `<video>` is paused and `autoplay` is stripped; a capture-phase `play` listener re-pauses programmatic playback. In-feed Short/Reel transitions are SPA navigations, so the engine re-derives the page mode on `pushState`, `replaceState`, `popstate`, and DOM mutations. Turning the toggle off (or disabling the site) removes the stylesheet, scope attributes, listeners, and history patch in one teardown — the page returns to stock with no residue.
+
+Selector rows in the SURFACES table carry verification dates. When a site ships new markup, a selector miss fails visible — content shows normally — until the row is refreshed; the fix is always a table row, never page logic. TikTok users who want the whole site gone already have the per-site switch: short-form mode is the finer instrument for keeping TikTok while suppressing the feed.
+
 ## Data and permissions
 
 | Information | Where it lives / where it goes |
@@ -104,6 +118,8 @@ Recording can be paused or cleared independently of cached classification scores
 - Classification is probabilistic. Covers do not remove the underlying DOM text and can be revealed. Unusual website layouts can affect selection and overlay placement.
 - Browser validation is left to the user. Automated checks cover the compiler and background messaging with mocked API responses; a separate live SDK smoke test calls the configured model.
 
+Short-form video blocking is deterministic DOM/URL logic, not interpretation: it suppresses the surfaces listed in the engine's SURFACES table and makes no judgment about other video. Selector rows are dated — YouTube rows were verified live (2026-09-24); TikTok, Instagram, and Facebook rows were verified against fixture structures only, because the live sites are login/bot-walled from the verification environment, so suppression there fails visible until their rows are re-verified. Page mode hides media regions, never site chrome, and a selector miss leaves content visible rather than blanking the page. With the toggle off, behavior is unchanged from the text-only extension.
+
 ## TrueForge setup and development
 
 The extension includes the bundled SDK and can be loaded without a build step. To install or update the local compiler agent, use Node.js **22.14 or newer** from this app folder:
@@ -113,23 +129,7 @@ npm ci
 npm run setup:trueforge
 ```
 
-TrueForge must already be running at `http://localhost:8790` with `openai/gpt-5-4-mini` configured. On the machine used for setup, run `~/.local/bin/trueforge` to restart the server. A separate Node 22 runtime is installed under `~/.local/share/trueforge/runtime`; if your terminal still uses Node 20, run:
-
-```sh
-export PATH="$HOME/.local/share/trueforge/runtime/node_modules/.bin:$PATH"
-```
-
-`setup:trueforge` creates or updates only the dedicated `content-blocker-compiler` agent through the SDK. To use another configured model that supports reasoning effort `none`, set `TRUEFORGE_MODEL` when running the setup script. The extension's **Test TrueForge connection** button verifies the server and agent without calling the model. It does not validate the provider key; saving an instruction does that.
-
-```sh
-npm run build       # rebuild extension/vendor/trueforge-sdk.js
-npm test            # automated compiler, SDK transport, and background race tests; no paid requests
-npm run test:live   # explicitly run a real model compilation and report latency
-```
-
-The tests cover strict JSON validation, exceptions in the Jev prompt, refusals, truncated output, paused runs, stream interruption, cancellation, actual SDK request serialization, settings access, existing-rule migration, unchanged-instruction reuse, and stale compilation races. Browser testing remains manual. Jev's existing classification and caching paths are unchanged. Automated DOM checks cover tweet images, late-loaded media, shared reveal, recycled tweets, threshold changes, disabling, and ordinary text passages.
-
-The SDK is pinned to 0.2.0 in the lockfile and bundled locally for Manifest V3; there are no remote scripts or runtime CDN imports. The local server must remain available when saving a changed instruction. Existing filters and Jev evaluation continue working while TrueForge is stopped.
+The tests cover strict JSON validation, exceptions in the Jev prompt, refusals, truncated output, paused runs, stream interruption, cancellation, actual SDK request serialization, settings access, existing-rule migration, unchanged-instruction reuse, and stale compilation races. Browser testing remains manual. Jev's existing classification and caching paths are unchanged. Automated DOM checks cover tweet images, late-loaded media, shared reveal, recycled tweets, threshold changes, disabling, and ordinary text passages. The short-form engine has its own suite covering SURFACES scoping, page and item modes, SPA transitions, teardown, and the manifest permission invariants.
 
 | File | Purpose |
 | --- | --- |
@@ -140,6 +140,7 @@ The SDK is pinned to 0.2.0 in the lockfile and bundled locally for Manifest V3; 
 | `extension/jev.js` | Jev classifier using the saved custom question |
 | `extension/background.js` | Rules, compilation, API broker, caches, quotas, and site registration |
 | `extension/content.js` | Text discovery, page-memory scores, rule invalidation, and overlays |
+| `extension/short-form.js` | Deterministic short-form suppression: SURFACES table, page and item modes, media stop, SPA re-derivation |
 | `extension/score-cache.js` | Persistent scores, batch lookup, and pending-request sharing |
 | `extension/popup.*` | Global instruction editor and current-site controls |
 | `extension/options.*` | TrueForge connection check, TypeSafe key, threshold, and enabled sites |

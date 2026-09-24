@@ -34,7 +34,7 @@ const read = async () => {
 };
 const publicSettings = s => ({configured: !!s.apiKey, compilerAgent: COMPILER_AGENT, compilerUrl: TRUEFORGE_URL,
   filterReady: !!s.filter, instruction: s.filter?.instruction || '', filterSummary: s.filter?.summary || '',
-  filterId: s.filter?.id || null, threshold: s.threshold, sites: s.sites});
+  filterId: s.filter?.id || null, threshold: s.threshold, sites: s.sites, shortForm: !!s.shortForm});
 const publicConfig = (s, origin) => ({configured: !!s.apiKey && !!s.filter, threshold: s.threshold,
   enabled: s.sites.includes(origin), shortForm: !!s.shortForm, filterId: s.filter?.id || null, limit: 120});
 const originOf = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.origin : null; } catch { return null; } };
