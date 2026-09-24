@@ -1,8 +1,89 @@
 (() => {
   if (globalThis.__slopShield) return;
   globalThis.__slopShield = true;
-  const SELECTOR = 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]';
-  const EXCLUDE = 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]';
+  // SiteAdaptor seam. The canonical modules live in extension/adaptors/ (pure
+  // ES modules); content.js is injected as a classic script, so it carries a
+  // runtime mirror that tests/registry.test.js keeps honest with them.
+  const genericAdaptor = {
+    id: 'generic',
+    matches: () => true,
+    candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // A flagged tweet covers its whole article, including attached images and
+    // quoted content. Other page passages keep their individual text covers.
+    targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
+    // Topic preferences can match short tweets; generic page fragments still
+    // need enough text to avoid spending requests on tiny interface labels.
+    minText: node => node.matches('[data-testid="tweetText"]') ? 1 : 20,
+    // Shipped media policy: a candidate holding interactive or media
+    // descendants is never scored on its own.
+    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
+    container: '[data-testid="tweetText"]'
+  };
+  const xAdaptor = {
+    id: 'x',
+    matches: h => h === 'x.com' || h === 'twitter.com' || h.endsWith('.x.com') || h.endsWith('.twitter.com'),
+    candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // A flagged tweet covers its whole article, including attached images and
+    // quoted content. Other page passages keep their individual text covers.
+    targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
+    // Topic preferences can match short tweets; generic page fragments still
+    // need enough text to avoid spending requests on tiny interface labels.
+    minText: node => node.matches('[data-testid="tweetText"]') ? 1 : 20,
+    // Shipped media policy: a candidate holding interactive or media
+    // descendants is never scored on its own.
+    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
+    container: '[data-testid="tweetText"]'
+  };
+  const redditAdaptor = {
+    id: 'reddit',
+    matches: h => h === 'reddit.com' || h.endsWith('.reddit.com'),
+    candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // A flagged tweet covers its whole article, including attached images and
+    // quoted content. Other page passages keep their individual text covers.
+    targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
+    // Topic preferences can match short tweets; generic page fragments still
+    // need enough text to avoid spending requests on tiny interface labels.
+    minText: node => node.matches('[data-testid="tweetText"]') ? 1 : 20,
+    // Shipped media policy: a candidate holding interactive or media
+    // descendants is never scored on its own.
+    eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
+    container: '[data-testid="tweetText"]'
+  };
+  const linkedinAdaptor = {
+    id: 'linkedin',
+    matches: h => h === 'linkedin.com' || h.endsWith('.linkedin.com'),
+    candidates: 'span[dir="auto"], div[dir="auto"], p, li, blockquote',
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // A flagged post covers its text container — the bidi block carrying the
+    // prose — not the whole card: media beside the flagged text stays visible
+    // (unlike X, where the cover spans the whole article). closest() keeps the
+    // cover on the text container when a passage is relocated or unwrapped.
+    targetOf: node => node.closest('span[dir="auto"], div[dir="auto"]') || node,
+    // Post prose and search snippets run long; interface labels stay out of
+    // the budget.
+    minText: () => 20,
+    // Media policy: feed cards routinely carry images beside their text, and
+    // hashtag links and "see more" toggles live inside the prose block. Only
+    // interactive form controls disqualify a candidate — media and inline
+    // links/buttons no longer drop a text block (the shipped policy did).
+    eligible: node => !node.querySelector('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
+    // The bidi text block is the atomic discovery unit: inner candidates
+    // collapse into it, so a post is one candidate, not one per fragment.
+    container: 'span[dir="auto"], div[dir="auto"]'
+  };
+  const SITE_ADAPTORS = [xAdaptor, redditAdaptor, linkedinAdaptor];
+  const adaptorFor = hostname => {
+    const host = (hostname || '').toLowerCase();
+    return SITE_ADAPTORS.find(a => a.matches(host)) ?? genericAdaptor;
+  };
+  // A content script's hostname never changes, so the adaptor resolves once.
+  const adaptor = adaptorFor(globalThis.location?.hostname ?? '');
+  // Exposed for tests/registry.test.js to audit the mirror against the
+  // canonical modules; harmless in the isolated content-script world.
+  globalThis.__slopShieldAdaptors = {x: xAdaptor, reddit: redditAdaptor, linkedin: linkedinAdaptor, generic: genericAdaptor, adaptorFor};
   const MAX = 10000;
   let config = {enabled: false, configured: false, threshold: .85, limit: 120, filterId: null};
   let epoch = 0, configRequest = 0, busy = false, lookupBusy = false, error = '', timer, observer, paused = false, checked = 0, evaluated = 0;
@@ -17,8 +98,8 @@
   };
   const active = () => config.enabled && config.configured && !paused;
   const eligible = node => {
-    if (!node.isConnected || node.closest(EXCLUDE) || node.closest('a, button, [role="button"]') ||
-        node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe')) return false;
+    if (!node.isConnected || node.closest(adaptor.exclude) || node.closest('a, button, [role="button"]') ||
+        (adaptor.eligible && !adaptor.eligible(node))) return false;
     if (['hidden', 'collapse'].includes(getComputedStyle(node).visibility)) return false;
     for (let p = node; p && p.nodeType === 1; p = p.parentElement)
       if (getComputedStyle(p).display === 'none') return false;
@@ -26,10 +107,8 @@
     return r.width > 30 && r.height > 12;
   };
   const valid = (node, text) => eligible(node) && textOf(node) === text;
-  // A flagged tweet covers its whole article, including attached images and
-  // quoted content. Other page passages keep their individual text covers.
-  const targetOf = node => node.matches('[data-testid="tweetText"]')
-    ? node.closest('article') || node : node;
+  // Cover grouping comes from the active adaptor (shipped: whole tweets).
+  const targetOf = node => adaptor.targetOf(node);
   const distance = node => {
     const r = node.getBoundingClientRect();
     return Math.max(0, r.top - innerHeight, -r.bottom) + Math.max(0, r.left - innerWidth, -r.right);
@@ -119,14 +198,14 @@
     // Discovery and cached covers continue while DETECT is busy or its budget
     // is exhausted. Feed nodes are temporary; the text score cache is not.
     clean(); pending.clear(); lookupQueue.clear();
-    for (const node of document.querySelectorAll(SELECTOR)) {
-      if (node.closest('[data-testid="tweetText"]') && !node.matches('[data-testid="tweetText"]')) continue;
-      if (node.querySelector(SELECTOR) && !node.matches('[data-testid="tweetText"]')) continue;
+    for (const node of document.querySelectorAll(adaptor.candidates)) {
+      // A container candidate swallows its subtree: inner candidates are
+      // skipped, and the container is kept even when it wraps other candidates.
+      if (adaptor.container && node.closest(adaptor.container) && !node.matches(adaptor.container)) continue;
+      if (node.querySelector(adaptor.candidates) && !(adaptor.container && node.matches(adaptor.container))) continue;
       if (!eligible(node)) continue;
       const text = textOf(node);
-      // Topic preferences can match short tweets; generic page fragments still
-      // need enough text to avoid spending requests on tiny interface labels.
-      if (text.length < (node.matches('[data-testid="tweetText"]') ? 1 : 20) || text.length > 4000) continue;
+      if (text.length < adaptor.minText(node) || text.length > 4000) continue;
       if (records.get(node)?.text === text) continue;
       if (scores.has(text)) {
         const score = scores.get(text);
@@ -218,7 +297,7 @@
           !(m.type === 'childList' && [...m.addedNodes, ...m.removedNodes].every(n => n.nodeType === 1 && n.hasAttribute('data-slop-shield'))));
         if (relevant) schedule();
       });
-      observer.observe(document.body, {subtree: true, childList: true, characterData: true,
+      observer.observe(document.body, adaptor.observe ?? {subtree: true, childList: true, characterData: true,
         attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'class', 'style', 'contenteditable', 'role', 'data-testid', 'dir']});
       schedule();
     } catch (e) { if (request === configRequest) error = e.message; }
