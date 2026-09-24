@@ -4,7 +4,7 @@ import {COMPILER_VERSION, COMPILER_AGENT, TRUEFORGE_URL} from './compiler-agent.
 import {ScoreCache} from './score-cache.js';
 import {RequestLog, redact, responsePreview} from './request-log.js';
 
-const defaults = {apiKey: '', filter: null, threshold: 0.85, sites: []};
+const defaults = {apiKey: '', filter: null, threshold: 0.85, sites: [], shortForm: false};
 const ready = chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const sessionReady = chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const log = new RequestLog({
@@ -36,7 +36,7 @@ const publicSettings = s => ({configured: !!s.apiKey, compilerAgent: COMPILER_AG
   filterReady: !!s.filter, instruction: s.filter?.instruction || '', filterSummary: s.filter?.summary || '',
   filterId: s.filter?.id || null, threshold: s.threshold, sites: s.sites});
 const publicConfig = (s, origin) => ({configured: !!s.apiKey && !!s.filter, threshold: s.threshold,
-  enabled: s.sites.includes(origin), filterId: s.filter?.id || null, limit: 120});
+  enabled: s.sites.includes(origin), shortForm: !!s.shortForm, filterId: s.filter?.id || null, limit: 120});
 const originOf = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.origin : null; } catch { return null; } };
 const trusted = (sender) => sender.id === chrome.runtime.id && sender.url?.startsWith(chrome.runtime.getURL(''));
 const pattern = (origin) => { const u = new URL(origin); return `${u.protocol}//${u.hostname}/*`; };
@@ -227,14 +227,18 @@ async function handle(m, sender) {
       if (typeof m[key] !== 'string' || m[key].length > 1024 || /\s/.test(m[key])) throw new Error('Enter a valid API key without whitespace.');
       update[key] = m[key];
     }
+    if (m.shortForm !== undefined) {
+      if (typeof m.shortForm !== 'boolean') throw new Error('Invalid short-form setting.');
+      update.shortForm = m.shortForm;
+    }
     await persistSettings(update); return {ok: true};
   }
   if (m.type === 'SET_SITE') {
     const origin = originOf(m.origin);
     if (!origin || origin !== m.origin) throw new Error('Unsupported page.');
     if (m.enabled && !await chrome.permissions.contains({origins: [pattern(origin)]})) throw new Error('Site permission was not granted.');
-    if (m.enabled && !s.apiKey) throw new Error('Add an API key first.');
-    if (m.enabled && !s.filter) throw new Error('Save a blocking instruction in the popup first.');
+    if (m.enabled && !s.shortForm && !s.apiKey) throw new Error('Add an API key first.');
+    if (m.enabled && !s.shortForm && !s.filter) throw new Error('Save a blocking instruction in the popup first.');
     const sites = s.sites.filter(x => x !== origin);
     if (m.enabled) sites.push(origin);
     await persistSettings({sites});
