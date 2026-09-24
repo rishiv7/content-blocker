@@ -63,7 +63,7 @@ Implementation reference: [TrueForge SDK quickstart](https://trueforge.dev/api/q
 
 ### Page classification and caching
 
-The page script discovers eligible text throughout the mounted DOM, including off-screen content. Visible and nearby passages are prioritized. It never fetches unloaded tweets or calls a website's private API. Nested tweet text is kept together. A flagged tweet covers its enclosing article, so attached images (including images loaded later) are covered without extra API calls. Multiple flagged text passages in the same tweet share one cover and one reveal action. Generic page text retains passage-sized covers.
+The page script discovers eligible text throughout the mounted DOM, including off-screen content and every reachable open shadow root. Visible and nearby passages are prioritized. It never fetches unloaded tweets or calls a website's private API. Nested tweet text is kept together. A flagged tweet covers its enclosing article, so attached images (including images loaded later) are covered without extra API calls. Multiple flagged text passages in the same tweet share one cover and one reveal action. Generic page text retains passage-sized covers.
 
 Page memory retains up to 10,000 recent text scores after their DOM nodes disappear. Returning tweets can receive covers without another background message. Persistent cache probes run in batches of 64 independently of slow Jev evaluations, and cache hits still work when the new-evaluation budget is exhausted or an API error has paused new requests.
 
@@ -96,13 +96,20 @@ Recording can be paused or cleared independently of cached classification scores
 
 ## Limits
 
-- Filtering decisions use **text passages**. On X/Twitter, a flagged tweet’s entire article is covered, including attached images and other media. Image-only tweets are not independently classified. Generic pages keep text-only covers. Embedded frames, PDFs, shadow-root content, browser pages, and Chrome Web Store pages are outside its scope.
+- Filtering decisions use **text passages**. On X/Twitter, a flagged tweet’s entire article is covered, including attached images and other media. Image-only tweets are not independently classified. Generic pages keep text-only covers. Embedded frames, PDFs, closed shadow-root content, browser pages, and Chrome Web Store pages are outside its scope.
 - Tweet text may be as short as one character; other page passages must be at least 20 characters. All passages are limited to 4,000 characters. No image, audio, author-profile, or video interpretation is performed.
 - Each scan permits **120 new Jev API evaluations**, with one pending evaluation per page and up to four across the extension. Cached and shared scores do not consume the page budget. Up to 10,000 distinct passages can be queued at once.
 - Each document has an in-memory limit of 360 uncached evaluations per hour; worker restarts reset this guardrail. It is not a provider billing cap.
 - Jev requests time out after 20 seconds. TrueForge compilation times out after 25 seconds. There are no automatic paid retries.
 - Classification is probabilistic. Covers do not remove the underlying DOM text and can be revealed. Unusual website layouts can affect selection and overlay placement.
 - Browser validation is left to the user. Automated checks cover the compiler and background messaging with mocked API responses; a separate live SDK smoke test calls the configured model.
+
+## Coverage and limits
+
+- **Open shadow roots are covered.** On every enabled site without a dedicated adaptor, discovery scans the document and every reachable open shadow root, depth-first, so frameworks that compose UI inside open shadow roots are found by the same scan that reads the light DOM.
+- **Closed shadow roots are unreachable by design.** The page script never breaks encapsulation: a closed shadow root reports no root to the page script, its content is never classified, and encountering one is silent rather than an error. Content hidden inside a closed root is out of reach even when roots nested inside it are open.
+- **Generic coverage is best-effort on proprietary UIs.** Conventional markup — articles, blogs, documentation, forums — is covered reliably; heavily scripted or unusual layouts get the same scan with no site-specific tuning, and coverage quality is only as good as the markup exposes. Dedicated adaptors (X, Reddit, later LinkedIn) close the gap on the sites people actually scroll.
+- **Dialog surfaces follow a neutral policy on generic origins.** There is no blanket `role="dialog"` exclusion, so article lightboxes and comment modals are candidate surfaces. Interface chrome stays excluded structurally — navigation, forms, text boxes, and editable areas are never scored — which keeps login modals and cookie banners uncovered.
 
 ## TrueForge setup and development
 
