@@ -10,7 +10,7 @@ class Control {
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
 }
-const initial = {configured: true, openaiConfigured: true, filterReady: true, instruction: 'No travel',
+const initial = {configured: true, compilerAgent: 'content-blocker-compiler', filterReady: true, instruction: 'No travel',
   filterSummary: 'Hide travel content', filterId: 'one', threshold: .85, sites: ['https://example.com']};
 async function fixture(name = 'popup', overrides = {}) {
   const [html, source] = await Promise.all(['html', 'js'].map(ext => readFile(new URL(`../extension/${name}.${ext}`, import.meta.url), 'utf8')));
@@ -61,7 +61,7 @@ test('popup retains edited drafts through polling and saves a global instruction
 
 test('popup preserves failed drafts and shows the still-active saved rule', async () => {
   const h = await fixture(), c = h.controls;
-  h.hooks.SAVE_INSTRUCTION = async () => ({error: 'OpenAI unavailable.'});
+  h.hooks.SAVE_INSTRUCTION = async () => ({error: 'TrueForge unavailable.'});
   c.instruction.value = 'No politics'; c.instruction.events.input();
   await c.apply.events.click(); await h.refresh();
   assert.equal(c.instruction.value, 'No politics');
@@ -69,35 +69,9 @@ test('popup preserves failed drafts and shows the still-active saved rule', asyn
   assert.match(c['rule-message'].textContent, /previous filter is still active/);
 });
 
-test('popup disables saving without an OpenAI key and names the fix', async () => {
-  const h = await fixture('popup', {openaiConfigured: false}), c = h.controls;
-  assert.equal(c.apply.disabled, true, 'saving a new filter needs the OpenAI key');
-  assert.equal(c['rule-message'].textContent, 'Add an OpenAI API key in Settings to save a new filter.');
-  c.instruction.value = 'No politics'; c.instruction.events.input();
-  assert.equal(c.apply.disabled, true, 'gating holds even with a draft');
-  await c['clear-rule'].events.click();
-  assert.equal(c.instruction.value, '', 'clearing a rule stays possible without a key');
-  assert.equal(c['active-summary'].textContent, 'No active filter');
-  assert.equal(c.status.textContent, 'Save a filter to start');
-  assert.equal(c.toggle.disabled, false, 'an enabled site can still be switched off');
-  assert.equal(c.rescan.disabled, true);
-});
-
-test('popup enables Apply with a key and clears the gating message', async () => {
-  const h = await fixture('popup', {openaiConfigured: false}), c = h.controls;
-  assert.equal(c.apply.disabled, true);
-  Object.assign(h.settings, {openaiConfigured: true});
-  await h.refresh();
-  assert.equal(c.apply.disabled, false);
-  assert.equal(c['rule-message'].textContent, '', 'the key message clears once a key is configured');
-  c.instruction.value = 'No politics'; c.instruction.events.input();
-  await c.apply.events.click();
-  assert.equal(h.requests.find(m => m.type === 'SAVE_INSTRUCTION').instruction, 'No politics');
-});
-
 test('clearing a rule works without an OpenAI key and does not report active filtering', async () => {
   const h = await fixture('popup', {openaiConfigured: false}), c = h.controls;
-  assert.equal(c.apply.disabled, true, 'saving a new filter still needs the OpenAI key');
+  assert.equal(c.apply.disabled, false, 'saving no longer needs an extension OpenAI key');
   await c['clear-rule'].events.click();
   assert.equal(c.instruction.value, '');
   assert.equal(c['active-summary'].textContent, 'No active filter');
@@ -124,17 +98,13 @@ test('settings submits keys only when entered, preserves saved keys on blank fie
   const h = await fixture('options'), c = h.controls;
   const submit = () => c.form.events.submit({preventDefault() {}});
   c.key.value = 'example-jev-key';
-  c['openai-key'].value = 'example-openai-key';
   await submit();
   assert.deepEqual(h.requests.find(m => m.type === 'SAVE_SETTINGS'), {type: 'SAVE_SETTINGS', threshold: .85,
-    apiKey: 'example-jev-key', openaiApiKey: 'example-openai-key'});
+    apiKey: 'example-jev-key'});
   assert.equal(c.key.value, '');
-  assert.equal(c['openai-key'].value, '');
   await submit();
   assert.deepEqual(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1), {type: 'SAVE_SETTINGS', threshold: .85});
   await c['remove-key'].events.click();
   assert.equal(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1).apiKey, '');
   assert.equal(c.test.disabled, true, 'Jev testing needs the TypeSafe key');
-  await c['remove-openai-key'].events.click();
-  assert.equal(h.requests.filter(m => m.type === 'SAVE_SETTINGS').at(-1).openaiApiKey, '');
 });

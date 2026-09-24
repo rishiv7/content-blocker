@@ -8,9 +8,7 @@ function showRule(s) {
   $('active-instruction').textContent = s.instruction ? `Saved rule: ${s.instruction}` : 'Write a rule above to begin.';
   $('clear-rule').hidden = !s.instruction && !s.filterReady;
   if (!draftDirty && document.activeElement !== $('instruction')) { $('instruction').value = s.instruction || ''; updateCount(); }
-  $('apply').disabled = saving || !s.openaiConfigured || !$('instruction').value.trim();
-  if (!s.openaiConfigured && !saving && !$('rule-message').textContent) message('rule-message', 'Add an OpenAI API key in Settings to save a new filter.');
-  if (s.openaiConfigured && $('rule-message').textContent === 'Add an OpenAI API key in Settings to save a new filter.') message('rule-message', '');
+  $('apply').disabled = saving || !$('instruction').value.trim();
 }
 async function refresh() {
   if (refreshBusy) return;
@@ -34,20 +32,20 @@ async function refresh() {
     if (state?.error) message('message', state.error, true);
   } finally { refreshBusy = false; }
 }
-$('instruction').addEventListener('input', () => { draftDirty = true; updateCount(); $('apply').disabled = saving || !settings?.openaiConfigured || !$('instruction').value.trim(); });
+$('instruction').addEventListener('input', () => { draftDirty = true; updateCount(); $('apply').disabled = saving || !$('instruction').value.trim(); });
 $('apply').addEventListener('click', async () => {
-  if (saving || !settings?.openaiConfigured) return;
+  if (saving) return;
   const instruction = $('instruction').value.trim();
   if (!instruction) return;
   refreshRevision++;
-  saving = true; $('apply').disabled = $('clear-rule').disabled = true; message('rule-message', 'Saving your filter…');
+  saving = true; $('apply').disabled = $('clear-rule').disabled = true; message('rule-message', 'Preparing your filter with TrueForge…');
   try {
     await send({type: 'SAVE_INSTRUCTION', instruction}); refreshRevision++;
     if ($('instruction').value.trim() === instruction) draftDirty = false;
     message('rule-message', 'Filter saved and applied.');
     await refresh();
   } catch (e) { message('rule-message', `Could not save: ${e.message}${settings?.filterReady ? ' Your previous filter is still active.' : ''}`, true); }
-  finally { saving = false; $('clear-rule').disabled = false; $('apply').disabled = !settings?.openaiConfigured || !$('instruction').value.trim(); }
+  finally { saving = false; $('clear-rule').disabled = false; $('apply').disabled = !$('instruction').value.trim(); }
 });
 $('clear-rule').addEventListener('click', async () => {
   if (saving) return;
@@ -60,7 +58,7 @@ $('clear-rule').addEventListener('click', async () => {
     message('rule-message', 'Filter cleared everywhere.'); await refresh();
   }
   catch (e) { message('rule-message', e.message, true); }
-  finally { saving = false; $('clear-rule').disabled = false; $('apply').disabled = !settings?.openaiConfigured || !$('instruction').value.trim(); }
+  finally { saving = false; $('clear-rule').disabled = false; $('apply').disabled = !$('instruction').value.trim(); }
 });
 $('toggle').addEventListener('click', async () => {
   const enabled = !settings.sites.includes(origin);
