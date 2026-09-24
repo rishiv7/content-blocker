@@ -1,0 +1,5 @@
+# Autobuild repo policy — auto-detected via GitHub API (repos/rishiv7/content-blocker) on 2026-09-24
+defaultBranch: main
+mergeMethod: squash
+allowedMergeMethods: [merge, squash, rebase]
+deleteBranchOnMerge: false
