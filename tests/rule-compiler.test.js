@@ -1,92 +1,118 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {TrueForge} from '../extension/vendor/trueforge-sdk.js';
-import {compileInstruction, normalizeInstruction, parseCompilerResponse} from '../extension/rule-compiler.js';
+import {compileInstruction, normalizeInstruction, parseCompilerResponse, buildCompilerRequest, COMPILER_VERSION} from '../extension/rule-compiler.js';
 import {buildRequest} from '../extension/jev.js';
 
 const fields = {summary: 'Block travel except local news.', instructions: 'Allow local news even when about travel.', block: 'Travel that is not local news.', allow: 'Local news, including travel; non-travel and ambiguous text.'};
-const state = (output = {}) => ({status: 'done', requiredActions: [], output: {type: 'model.message', threadId: 'main', finishReason: 'stop', content: JSON.stringify(fields), ...output}});
-const fake = (events) => ({sessions: {create: async () => ({data: {id: 'session-1'}}), createTurnStream: async () => ({async *withMetadata() {for (const data of events) yield {data};}}), cancel: async () => {}}});
+const outputText = (text = JSON.stringify(fields)) => [{type: 'message', content: [{type: 'output_text', text}]}];
+const completed = (output = outputText()) => ({id: 'resp_1', status: 'completed', output});
+
+test('compiler requests target gpt-6-luna on the Responses API with strict JSON output', () => {
+  const request = buildCompilerRequest(' No travel,  except local news. ');
+  assert.equal(request.model, 'gpt-6-luna');
+  assert.match(request.instructions, /Explicit allow exceptions ALWAYS win over block topics/);
+  assert.deepEqual(request.input, [{role: 'user', content: 'No travel, except local news.'}]);
+  assert.equal(request.store, false);
+  assert.equal(request.max_output_tokens, 1600);
+  assert.equal(request.temperature, 0);
+  assert.deepEqual(request.reasoning, {effort: 'none'});
+  assert.equal(request.text.format.type, 'json_schema');
+  assert.equal(request.text.format.name, 'blocking_rule');
+  assert.equal(request.text.format.strict, true);
+  assert.deepEqual(request.text.format.schema.required, ['summary', 'instructions', 'block', 'allow']);
+  assert.equal(request.text.format.schema.additionalProperties, false);
+});
+
+test('version marker identifies the direct OpenAI compiler', () => {
+  assert.equal(COMPILER_VERSION, 'direct-openai-v1');
+});
 
 test('validates strict fields and produces a Jev-compatible question with original preference', () => {
-  const result = parseCompilerResponse(state(), ' No travel,  except local news. ');
+  const result = parseCompilerResponse(completed(), ' No travel,  except local news. ');
   assert.equal(result.instruction, 'No travel, except local news.');
   assert.equal(buildRequest('A local airport update.', result.question).questions.should_block.criteria.false, fields.allow);
   assert.match(result.question.instructions, /Explicit user exceptions take precedence/);
 });
 
 test('rejects malformed, extra, empty and oversized fields', () => {
-  for (const content of ['{', '[]', JSON.stringify({...fields, extra: true}), JSON.stringify({...fields, allow: ''}), JSON.stringify({...fields, summary: 'x'.repeat(241)}), JSON.stringify({...fields, block: 'x'.repeat(2001)})]) {
-    assert.throws(() => parseCompilerResponse(state({content}), 'No travel'), /invalid/);
+  for (const text of ['{', '[]', JSON.stringify({...fields, extra: true}), JSON.stringify({...fields, allow: ''}), JSON.stringify({...fields, summary: 'x'.repeat(241)}), JSON.stringify({...fields, block: 'x'.repeat(2001)})]) {
+    assert.throws(() => parseCompilerResponse(completed(outputText(text)), 'No travel'), /invalid/);
   }
   for (const input of ['', null, 'x'.repeat(2001)]) assert.throws(() => normalizeInstruction(input));
 });
 
-test('rejects partial, refused, paused, cancelled and non-root model output', () => {
-  for (const value of [state({finishReason: 'length'}), state({refusal: 'No'}), state({content: [{type: 'refusal', refusal: 'No'}]}), state({threadId: 'child'}), {...state(), requiredActions: [{}]}, {status: 'cancelled'}, {status: 'error'}]) {
-    assert.throws(() => parseCompilerResponse(value, 'No travel'));
+test('rejects incomplete responses, refusals, and non-text message content', () => {
+  for (const body of [{status: 'in_progress', output: []}, {status: 'failed', output: []}, {output: 'not-an-array'},
+    completed([{type: 'message', content: [{type: 'refusal', refusal: 'No'}]}]),
+    completed([{type: 'message', content: 'string content'}]),
+    completed([{type: 'reasoning', content: []}]),
+    completed(outputText('{"summary": "one"}'))]) {
+    assert.throws(() => parseCompilerResponse(body, 'No travel'));
   }
 });
 
-test('accepts structured content parts and waits for terminal output, ignoring deltas', async () => {
-  const result = await compileInstruction('No travel', undefined, fake([
-    {type: 'model.message.delta', content: '{bad partial'},
-    {type: 'turn.done', state: state({content: [{type: 'text', text: JSON.stringify(fields)}]})}
-  ]));
-  assert.equal(result.summary, fields.summary);
-});
-
-test('cancels server work when stream ends without terminal result', async () => {
-  const sdk = fake([]); let cancelled;
-  sdk.sessions.cancel = async id => {cancelled = id;};
-  await assert.rejects(compileInstruction('No travel', undefined, sdk), /disconnected/);
-  assert.equal(cancelled, 'session-1');
-});
-
-test('abort reaches SDK and cancels the server-side turn', async () => {
-  const controller = new AbortController(); const sdk = fake([]); let cancelled = false;
-  sdk.sessions.createTurnStream = async (id, request, options) => {
-    assert.equal(options.abortSignal, controller.signal);
-    controller.abort(); throw new DOMException('Aborted', 'AbortError');
+test('compileInstruction sends the Bearer key and gpt-6-luna body to the real endpoint', async t => {
+  const previousFetch = globalThis.fetch, calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({url: String(url), init, body: JSON.parse(init.body)});
+    return Response.json(completed());
   };
-  sdk.sessions.cancel = async () => {cancelled = true;};
-  await assert.rejects(compileInstruction('No travel', controller.signal, sdk), {name: 'AbortError'});
-  assert.equal(cancelled, true);
+  t.after(() => { globalThis.fetch = previousFetch; });
+  const result = await compileInstruction('No travel', 'sk-test-key');
+  assert.equal(result.summary, fields.summary);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.openai.com/v1/responses');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer sk-test-key');
+  assert.equal(new Headers(calls[0].init.headers).get('Content-Type'), 'application/json');
+  assert.equal(calls[0].init.credentials, 'omit');
+  assert.equal(calls[0].init.redirect, 'error');
+  assert.equal(calls[0].init.cache, 'no-store');
+  assert.equal(calls[0].body.model, 'gpt-6-luna');
+  assert.deepEqual(calls[0].body.reasoning, {effort: 'none'});
+  assert.equal(calls[0].body.text.format.name, 'blocking_rule');
 });
 
-test('pre-aborted instructions never create a session', async () => {
-  const sdk = fake([]); sdk.sessions.create = () => assert.fail('unexpected session');
-  await assert.rejects(compileInstruction('No travel', AbortSignal.abort(), sdk), {name: 'AbortError'});
-});
-
-test('offline and missing agent errors are actionable', async () => {
-  for (const [error, message] of [[new TypeError('fetch failed'), /Start it/], [{statusCode: 404}, /setup:trueforge/]]) {
-    const sdk = fake([]); sdk.sessions.create = async () => {throw error;};
-    await assert.rejects(compileInstruction('No travel', undefined, sdk), message);
+test('saving without a key is blocked with the popup message before any request', async t => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = () => assert.fail('no request without a key');
+  t.after(() => { globalThis.fetch = previousFetch; });
+  for (const key of [undefined, '', '   ']) {
+    await assert.rejects(compileInstruction('No travel', key), /Add an OpenAI API key in Settings to save a new filter\./);
   }
 });
 
-test('bundled SDK sends actual session/SSE wire requests to local TrueForge with no provider key', async () => {
-  const calls = [];
-  const sdk = new TrueForge({baseUrl: 'http://localhost:8790', maxRetries: 0, fetch: async (url, init) => {
-    calls.push({url: String(url), init});
-    if (String(url).endsWith('/turns')) {
-      const payload = {type: 'turn.done', id: 'e1', thread_id: 'main', turn_id: 't1', created_at: new Date().toISOString(), state: {
-        status: 'done', required_actions: [], completed_at: new Date().toISOString(), output: {
-          type: 'model.message', id: 'm1', thread_id: 'main', created_at: new Date().toISOString(),
-          finish_reason: 'stop', content: JSON.stringify(fields)
-        }
-      }};
-      return new Response(`event: turn.done\nid: 1\ndata: ${JSON.stringify(payload)}\n\n`, {headers: {'Content-Type': 'text/event-stream'}});
-    }
-    return Response.json({data: {id: 's1'}});
-  }});
-  const result = await compileInstruction('No travel', undefined, sdk);
-  assert.equal(result.summary, fields.summary);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].url, 'http://localhost:8790/api/v1/sessions');
-  assert.deepEqual(JSON.parse(calls[0].init.body).agent, {name: 'content-blocker-compiler'});
-  assert.deepEqual(JSON.parse(calls[1].init.body).input, [{type: 'user.message', content: 'No travel'}]);
-  assert.equal(JSON.parse(calls[1].init.body).stream, true);
-  for (const {init} of calls) assert.equal(new Headers(init.headers).has('Authorization'), false);
+test('HTTP errors map to key help, rate limit, and generic messages', async t => {
+  const previousFetch = globalThis.fetch;
+  const status = code => { globalThis.fetch = async () => new Response('provider error', {status: code}); };
+  t.after(() => { globalThis.fetch = previousFetch; });
+  status(401);
+  await assert.rejects(compileInstruction('No travel', 'sk-test-key'), {message: 'OpenAI API key rejected. Update it in Settings.'});
+  status(403);
+  await assert.rejects(compileInstruction('No travel', 'sk-test-key'), {message: 'Your OpenAI API key cannot access this model.'});
+  status(429);
+  await assert.rejects(compileInstruction('No travel', 'sk-test-key'), {message: 'OpenAI rate limit reached. Wait a moment and try again.'});
+  status(500);
+  await assert.rejects(compileInstruction('No travel', 'sk-test-key'), {message: 'OpenAI compiler unavailable (HTTP 500). Try again later.'});
+});
+
+test('a pre-aborted signal never reaches the network', async t => {
+  const previousFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; return Response.json(completed()); };
+  t.after(() => { globalThis.fetch = previousFetch; });
+  await assert.rejects(compileInstruction('No travel', 'sk-test-key', {signal: AbortSignal.abort()}), {name: 'AbortError'});
+  assert.equal(called, false);
+});
+
+test('aborting mid-request rejects the pending compile', async t => {
+  const previousFetch = globalThis.fetch;
+  const controller = new AbortController();
+  globalThis.fetch = (url, init) => new Promise((done, stop) => {
+    init.signal.addEventListener('abort', () => stop(new DOMException('Aborted', 'AbortError')));
+  });
+  t.after(() => { globalThis.fetch = previousFetch; });
+  const pending = compileInstruction('No travel', 'sk-test-key', {signal: controller.signal});
+  controller.abort();
+  await assert.rejects(pending, {name: 'AbortError'});
 });
