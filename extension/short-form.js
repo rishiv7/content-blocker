@@ -88,6 +88,17 @@
         `html[${PAGE_ATTR}="${surface.id}"] ${surface.pageHide} { display: none !important; }`,
         // Inert placeholder chip; there is no reveal affordance for video.
         `html[${PAGE_ATTR}="${surface.id}"] body::after { content: 'Short-form video blocked'; position: fixed !important; top: 12px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; padding: 4px 14px !important; border-radius: 999px !important; background: #eef0e9 !important; color: #5c6353 !important; font: 500 12px/1.4 system-ui, sans-serif !important; box-shadow: 0 1px 4px rgb(0 0 0 / 18%) !important; pointer-events: none !important; }`);
+      // Item mode: in-feed elements linking to short-form collapse to a small
+      // inert chip. Anchoring prefers the item's own link href over volatile
+      // class names; class-only rows are last-resort shelf candidates.
+      for (const item of surface.items) {
+        const anchor = item.hrefSelector ? `${item.container}:has(${item.hrefSelector})` : item.container;
+        const scope = `html[${ITEMS_ATTR}="${surface.id}"]`;
+        rules.push(
+          `${scope} ${anchor} > * { display: none !important; }`,
+          `${scope} ${anchor} { visibility: hidden !important; position: relative !important; box-sizing: border-box !important; height: 24px !important; min-height: 0 !important; max-height: 24px !important; overflow: hidden !important; border-radius: 8px !important; background: #eef0e9 !important; }`,
+          `${scope} ${anchor}::after { content: 'Blocked short-form video'; visibility: visible !important; position: absolute !important; inset: 0 !important; z-index: 2147483647 !important; font: 500 10px/24px system-ui, sans-serif !important; color: #5c6353 !important; text-align: center !important; letter-spacing: .02em !important; pointer-events: none !important; }`);
+      }
     }
     return rules.join('\n');
   }
@@ -107,16 +118,78 @@
     else root.removeAttribute(PAGE_ATTR);
   }
 
+  // ---- Media stop ----
+  // Matched regions get every <video> paused and autoplay stripped. Sites can
+  // also start playback programmatically, so a capture-phase play listener
+  // re-pauses between sweeps; the MutationObserver's only job is scheduling
+  // the sweep — CSS already covers newly inserted feed items.
+  let handled = new WeakSet(), sweepTimer = null, observer = null;
+
+  function matchedItemRoot(video) {
+    for (const item of state.surface.items) {
+      const root = video.closest(item.container);
+      if (root && (!item.hrefSelector || root.querySelector(item.hrefSelector))) return root;
+    }
+    return null;
+  }
+
+  // Page mode: the route itself is short-form, so every video on it belongs to
+  // the suppressed surface. Item mode: only videos inside a matched item.
+  function suppressible(video) {
+    return document.documentElement.getAttribute(PAGE_ATTR) === state.surface.id || !!matchedItemRoot(video);
+  }
+
+  function stop(video) {
+    handled.add(video);
+    video.pause();
+    video.removeAttribute('autoplay');
+  }
+
+  function sweep() {
+    if (!isActive()) return;
+    for (const video of document.querySelectorAll('video')) {
+      if (!handled.has(video) && suppressible(video)) stop(video);
+    }
+  }
+
+  function scheduleSweep() {
+    // Coalesce insertion storms into one sweep per burst without resetting
+    // the timer on every mutation.
+    if (sweepTimer) return;
+    sweepTimer = setTimeout(() => { sweepTimer = null; sweep(); }, 0);
+  }
+
+  function onPlay(event) {
+    const video = event.target;
+    if (!isActive() || video.tagName !== 'VIDEO' || !suppressible(video)) return;
+    stop(video);
+  }
+
+  function ensureObserver() {
+    if (observer) return;
+    observer = new MutationObserver(scheduleSweep);
+    // document_start: documentElement exists even when body does not yet.
+    observer.observe(document.documentElement, {subtree: true, childList: true});
+    document.addEventListener('play', onPlay, true);
+  }
+
   function sync() {
     state.surface = surfaceFor(location.hostname);
     if (!isActive()) { teardown(); return; }
     ensureStylesheet();
     document.documentElement.setAttribute(ITEMS_ATTR, state.surface.id);
     recomputePage();
+    ensureObserver();
+    scheduleSweep();
   }
 
   function teardown() {
     state.surface = null;
+    observer?.disconnect();
+    observer = null;
+    if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
+    document.removeEventListener('play', onPlay, true);
+    handled = new WeakSet();
     const root = document.documentElement;
     root.removeAttribute(PAGE_ATTR);
     root.removeAttribute(ITEMS_ATTR);
