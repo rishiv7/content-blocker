@@ -173,6 +173,48 @@
     document.addEventListener('play', onPlay, true);
   }
 
+  // ---- SPA navigation ----
+  // In-feed transitions are pushState/replaceState navigations that never
+  // reload the document; re-derive the page mode on every one. The patch
+  // exists only while suppression is active and is restored on teardown, so
+  // the mode-off behavior stays byte-for-byte today's.
+  const nativeHistory = {pushState: history.pushState, replaceState: history.replaceState};
+  let historyPatched = false;
+
+  function onNavigate() {
+    if (!isActive()) return;
+    recomputePage();
+    scheduleSweep();
+  }
+
+  const wrappedPush = function (...args) {
+    const result = nativeHistory.pushState.apply(history, args);
+    onNavigate();
+    return result;
+  };
+  const wrappedReplace = function (...args) {
+    const result = nativeHistory.replaceState.apply(history, args);
+    onNavigate();
+    return result;
+  };
+
+  function patchHistory() {
+    if (historyPatched) return;
+    historyPatched = true;
+    history.pushState = wrappedPush;
+    history.replaceState = wrappedReplace;
+    addEventListener('popstate', onNavigate);
+  }
+
+  function unpatchHistory() {
+    if (!historyPatched) return;
+    // A later wrapper layered on top of ours is not ours to remove.
+    if (history.pushState === wrappedPush) history.pushState = nativeHistory.pushState;
+    if (history.replaceState === wrappedReplace) history.replaceState = nativeHistory.replaceState;
+    removeEventListener('popstate', onNavigate);
+    historyPatched = false;
+  }
+
   function sync() {
     state.surface = surfaceFor(location.hostname);
     if (!isActive()) { teardown(); return; }
@@ -180,6 +222,7 @@
     document.documentElement.setAttribute(ITEMS_ATTR, state.surface.id);
     recomputePage();
     ensureObserver();
+    patchHistory();
     scheduleSweep();
   }
 
@@ -189,6 +232,7 @@
     observer = null;
     if (sweepTimer) { clearTimeout(sweepTimer); sweepTimer = null; }
     document.removeEventListener('play', onPlay, true);
+    unpatchHistory();
     handled = new WeakSet();
     const root = document.documentElement;
     root.removeAttribute(PAGE_ATTR);
