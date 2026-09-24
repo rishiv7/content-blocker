@@ -21,10 +21,12 @@
     {
       id: 'youtube',
       host: /(^|\.)youtube\.com$/,
-      // Verified 2026-09-24: on /shorts/<id> both <video> elements sit inside
-      // ytd-player / #player regions; masthead and guide sit outside them.
+      // Verified 2026-09-24: on /shorts/<id> the visible slide is
+      // ytd-reel-video-renderer, which wraps the (inner) ytd-player/#player
+      // hosts; hiding the slide removes the player, its metadata and the
+      // swipe peek together. Masthead and guide sit outside them.
       pagePath: /^\/shorts\/[^/?]+/,
-      pageHide: 'ytd-player, #player, ytd-short-player',
+      pageHide: 'ytd-player, #player, ytd-short-player, ytd-reel-video-renderer',
       items: [
         // Verified 2026-09-24 on search results: lockups are the present-day
         // markup and link relatively (/shorts/<id>).
@@ -87,7 +89,7 @@
         // header, navigation and other chrome are never matched.
         `html[${PAGE_ATTR}="${surface.id}"] ${surface.pageHide} { display: none !important; }`,
         // Inert placeholder chip; there is no reveal affordance for video.
-        `html[${PAGE_ATTR}="${surface.id}"] body::after { content: 'Short-form video blocked'; position: fixed !important; top: 12px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; padding: 4px 14px !important; border-radius: 999px !important; background: #eef0e9 !important; color: #5c6353 !important; font: 500 12px/1.4 system-ui, sans-serif !important; box-shadow: 0 1px 4px rgb(0 0 0 / 18%) !important; pointer-events: none !important; }`);
+        `html[${PAGE_ATTR}="${surface.id}"] body::after { content: 'Short-form video blocked'; position: fixed !important; bottom: 24px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; padding: 4px 14px !important; border-radius: 999px !important; background: #eef0e9 !important; color: #5c6353 !important; font: 500 12px/1.4 system-ui, sans-serif !important; box-shadow: 0 1px 4px rgb(0 0 0 / 18%) !important; pointer-events: none !important; }`);
       // Item mode: in-feed elements linking to short-form collapse to a small
       // inert chip. Anchoring prefers the item's own link href over volatile
       // class names; class-only rows are last-resort shelf candidates.

@@ -76,7 +76,7 @@ test('criterion 1: hard /shorts/ load hides the media region, stops the video, a
   });
   assert.deepEqual(h.flags(), {page: 'youtube', items: 'youtube'});
   assert.ok(h.hasStyle());
-  assert.match(h.css(), /html\[data-sf-page="youtube"\] ytd-player, #player, ytd-short-player \{ display: none !important; \}/);
+  assert.match(h.css(), /html\[data-sf-page="youtube"\] ytd-player, #player, ytd-short-player, ytd-reel-video-renderer \{ display: none !important; \}/);
   assert.match(h.css(), /body::after \{ content: 'Short-form video blocked'/);
   await h.waitFor(() => h.videos().every(v => h.stopped(v)));
   const css = h.css();
