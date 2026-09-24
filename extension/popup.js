@@ -23,7 +23,8 @@ async function refresh() {
     // Polling must not snap the checkbox back while its own save is in flight.
     if (!shortFormBusy) $('short-form').checked = !!s.shortForm;
     const enabled = !!origin && s.sites.includes(origin);
-    $('toggle').disabled = !origin || working || (!enabled && (!s.configured || !s.filterReady));
+    // With short-form on, enabling a site needs no key and no rule — only permission.
+    $('toggle').disabled = !origin || working || (!enabled && !s.shortForm && (!s.configured || !s.filterReady));
     $('toggle').setAttribute('aria-checked', String(enabled));
     $('status').classList.toggle('on', enabled);
     $('rescan').disabled = $('reveal').disabled = !enabled || working || !s.configured || !s.filterReady;
@@ -32,7 +33,10 @@ async function refresh() {
     if (version !== refreshRevision) return;
     $('covered').textContent = state?.covered || 0;
     $('checked').textContent = state?.checked || 0;
-    $('status').textContent = !origin ? 'Unavailable on this page' : !s.configured ? 'Add a TypeSafe key in Settings' : !s.filterReady ? 'Save a filter to start' : !enabled ? 'Off on this site' : !state ? 'Refresh the page to start' : state.error ? 'Scan paused' : state.busy ? 'Checking with Jev…' : state.paused ? 'All text revealed' : state.limit ? 'New scan limit reached · cache active' : 'Filtering this site';
+    // The text pipeline gates (key, filter) only name the missing prerequisite for
+    // covers; short-form mode is deterministic and needs neither.
+    const gate = !s.configured ? 'Add a TypeSafe key in Settings' : !s.filterReady ? 'Save a filter to start' : null;
+    $('status').textContent = !origin ? 'Unavailable on this page' : !enabled ? (s.shortForm ? 'Off on this site' : gate || 'Off on this site') : gate ? (s.shortForm ? 'Blocking short-form video' : gate) : !state ? 'Refresh the page to start' : state.error ? 'Scan paused' : state.busy ? 'Checking with Jev…' : state.paused ? 'All text revealed' : state.limit ? 'New scan limit reached · cache active' : 'Filtering this site';
     if (state?.error) message('message', state.error, true);
   } finally { refreshBusy = false; }
 }
