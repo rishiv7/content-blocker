@@ -6,11 +6,12 @@ import {JSDOM} from 'jsdom';
 import {adaptorFor} from '../extension/adaptors/registry.js';
 import {xAdaptor} from '../extension/adaptors/x.js';
 import {redditAdaptor} from '../extension/adaptors/reddit.js';
+import {linkedinAdaptor} from '../extension/adaptors/linkedin.js';
 import {genericAdaptor} from '../extension/adaptors/generic.js';
 
 const sourceOf = async path => readFile(new URL(path, import.meta.url), 'utf8');
 const contentSource = await sourceOf('../extension/content.js');
-const modules = {x: xAdaptor, reddit: redditAdaptor, generic: genericAdaptor};
+const modules = {x: xAdaptor, reddit: redditAdaptor, linkedin: linkedinAdaptor, generic: genericAdaptor};
 
 test('registry maps hostnames to site adaptors and falls back to generic', () => {
   assert.equal(adaptorFor('x.com').id, 'x');
@@ -19,14 +20,15 @@ test('registry maps hostnames to site adaptors and falls back to generic', () =>
   assert.equal(adaptorFor('sub.x.com').id, 'x');
   assert.equal(adaptorFor('reddit.com').id, 'reddit');
   assert.equal(adaptorFor('old.reddit.com').id, 'reddit');
-  // The LinkedIn adaptor lands with its own PR; generic serves linkedin.com.
-  assert.equal(adaptorFor('linkedin.com').id, 'generic');
+  assert.equal(adaptorFor('linkedin.com').id, 'linkedin');
+  assert.equal(adaptorFor('www.linkedin.com').id, 'linkedin');
   assert.equal(adaptorFor('example.com').id, 'generic');
   assert.equal(adaptorFor('').id, 'generic');
   // Look-alike hosts must not resolve to a site adaptor.
   assert.equal(adaptorFor('notx.com').id, 'generic');
   assert.equal(adaptorFor('x.company').id, 'generic');
   assert.equal(adaptorFor('reddit.com.br').id, 'generic');
+  assert.equal(adaptorFor('notlinkedin.com').id, 'generic');
 });
 
 test('registry is total: every hostname resolves to an adaptor, never undefined', () => {
@@ -46,7 +48,7 @@ test('adaptor modules are pure: no browser APIs, classification, or persistence'
   }
   assert.doesNotMatch(registry, /\bchrome\b|\bjev\b|\bstorage\b/, 'registry references a forbidden API');
   const imports = [...registry.matchAll(/from\s+'([^']+)'/g)].map(m => m[1]).sort();
-  assert.deepEqual(imports, ['./generic.js', './reddit.js', './x.js']);
+  assert.deepEqual(imports, ['./generic.js', './linkedin.js', './reddit.js', './x.js']);
 });
 
 test('every adaptor exposes the discovery contract and reserves the optional hooks', () => {
@@ -70,10 +72,10 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
   }
 });
 
-test('site adaptors carry the shipped selector and exclusion sets verbatim', () => {
+test('site adaptors shipped by the foundation carry the shipped selector and exclusion sets verbatim', () => {
   const shipped = 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]';
   const shippedExclude = 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]';
-  for (const adaptor of Object.values(modules)) {
+  for (const adaptor of [xAdaptor, redditAdaptor, genericAdaptor]) {
     assert.equal(adaptor.candidates, shipped);
     assert.equal(adaptor.exclude, shippedExclude);
   }
@@ -111,7 +113,7 @@ test('content.js mirrors the adaptor modules (whitespace-insensitive)', async ()
   // The runtime registry resolves like the canonical one.
   assert.equal(runtime.adaptorFor('x.com').id, 'x');
   assert.equal(runtime.adaptorFor('reddit.com').id, 'reddit');
-  assert.equal(runtime.adaptorFor('linkedin.com').id, 'generic');
+  assert.equal(runtime.adaptorFor('linkedin.com').id, 'linkedin');
   assert.equal(runtime.adaptorFor('example.com').id, 'generic');
 });
 
