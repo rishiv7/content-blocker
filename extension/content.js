@@ -52,9 +52,29 @@
     eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
     container: '[data-testid="tweetText"]'
   };
-  // TODO: linkedin adaptor arrives with the LinkedIn PR; linkedin.com is
-  // served by the generic adaptor until then.
-  const SITE_ADAPTORS = [xAdaptor, redditAdaptor];
+  const linkedinAdaptor = {
+    id: 'linkedin',
+    matches: h => h === 'linkedin.com' || h.endsWith('.linkedin.com'),
+    candidates: 'span[dir="auto"], div[dir="auto"], p, li, blockquote',
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // A flagged post covers its text container — the bidi block carrying the
+    // prose — not the whole card: media beside the flagged text stays visible
+    // (unlike X, where the cover spans the whole article). closest() keeps the
+    // cover on the text container when a passage is relocated or unwrapped.
+    targetOf: node => node.closest('span[dir="auto"], div[dir="auto"]') || node,
+    // Post prose and search snippets run long; interface labels stay out of
+    // the budget.
+    minText: () => 20,
+    // Media policy: feed cards routinely carry images beside their text, and
+    // hashtag links and "see more" toggles live inside the prose block. Only
+    // interactive form controls disqualify a candidate — media and inline
+    // links/buttons no longer drop a text block (the shipped policy did).
+    eligible: node => !node.querySelector('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
+    // The bidi text block is the atomic discovery unit: inner candidates
+    // collapse into it, so a post is one candidate, not one per fragment.
+    container: 'span[dir="auto"], div[dir="auto"]'
+  };
+  const SITE_ADAPTORS = [xAdaptor, redditAdaptor, linkedinAdaptor];
   const adaptorFor = hostname => {
     const host = (hostname || '').toLowerCase();
     return SITE_ADAPTORS.find(a => a.matches(host)) ?? genericAdaptor;
@@ -63,7 +83,7 @@
   const adaptor = adaptorFor(globalThis.location?.hostname ?? '');
   // Exposed for tests/registry.test.js to audit the mirror against the
   // canonical modules; harmless in the isolated content-script world.
-  globalThis.__slopShieldAdaptors = {x: xAdaptor, reddit: redditAdaptor, generic: genericAdaptor, adaptorFor};
+  globalThis.__slopShieldAdaptors = {x: xAdaptor, reddit: redditAdaptor, linkedin: linkedinAdaptor, generic: genericAdaptor, adaptorFor};
   const MAX = 10000;
   let config = {enabled: false, configured: false, threshold: .85, limit: 120, filterId: null};
   let epoch = 0, configRequest = 0, busy = false, lookupBusy = false, error = '', timer, observer, paused = false, checked = 0, evaluated = 0;

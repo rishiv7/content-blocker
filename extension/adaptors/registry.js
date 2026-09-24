@@ -8,11 +8,10 @@
 // shadow roots); absent hooks fall back to the shipped core behavior.
 import {xAdaptor} from './x.js';
 import {redditAdaptor} from './reddit.js';
+import {linkedinAdaptor} from './linkedin.js';
 import {genericAdaptor} from './generic.js';
 
-// TODO: linkedin adaptor arrives with the LinkedIn PR; linkedin.com is served
-// by the generic adaptor until then.
-const SITE_ADAPTORS = [xAdaptor, redditAdaptor];
+const SITE_ADAPTORS = [xAdaptor, redditAdaptor, linkedinAdaptor];
 
 export const adaptorFor = hostname => {
   const host = (hostname || '').toLowerCase();
