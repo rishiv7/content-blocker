@@ -272,7 +272,7 @@ test('criterion 9: the manifest gains only the short-form registration and zero 
     run_at: 'document_start',
   }]);
   assert.deepEqual(manifest.permissions, ['storage', 'activeTab', 'scripting']);
-  assert.deepEqual(manifest.host_permissions, ['https://api.typesafe.ai/*', 'https://api.openai.com/*']);
+  assert.deepEqual(manifest.host_permissions, ['https://api.typesafe.ai/*', 'http://localhost:8790/*']);
   assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://*/*']);
   assert.ok(!JSON.stringify(manifest).includes('declarativeNetRequest'));
 });
