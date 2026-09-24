@@ -243,6 +243,20 @@ test('every generated rule is scoped to the engine attributes and never targets 
   }
 });
 
+test('a router that bypasses the history patch still re-derives via mutations', async t => {
+  const h = await engine({url: 'https://www.youtube.com/watch?v=abc'});
+  assert.equal(h.flags().page, null);
+  // A router holding its own native reference skips our wrapper: the URL and
+  // the DOM change without onNavigate ever running (live YouTube behavior).
+  h.originalPush.call(h.window.history, {}, '', '/shorts/abc');
+  const slide = h.document.createElement('ytd-reel-video-renderer');
+  h.document.body.appendChild(slide); // the navigation's DOM swap
+  await h.waitFor(() => h.flags().page === 'youtube', 2000, 20);
+  h.originalPush.call(h.window.history, {}, '', '/watch?v=abc');
+  h.document.body.removeChild(slide);
+  await h.waitFor(() => h.flags().page === null, 2000, 20);
+});
+
 test('re-injection is idempotent', async t => {
   const h = await engine({url: 'https://www.youtube.com/'});
   h.window.eval(source);

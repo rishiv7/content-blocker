@@ -172,7 +172,14 @@
 
   function ensureObserver() {
     if (observer) return;
-    observer = new MutationObserver(scheduleSweep);
+    observer = new MutationObserver(() => {
+      // SPA routers holding their own cached history wrapper bypass ours
+      // (observed live on YouTube, 2026-09-24: pushState is never routed
+      // through the patched method). Every navigation they perform still
+      // mutates the document, so re-derive the page mode here as well.
+      recomputePage();
+      scheduleSweep();
+    });
     // document_start: documentElement exists even when body does not yet.
     observer.observe(document.documentElement, {subtree: true, childList: true});
     document.addEventListener('play', onPlay, true);
