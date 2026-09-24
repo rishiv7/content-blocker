@@ -23,10 +23,11 @@
       host: /(^|\.)youtube\.com$/,
       // Verified 2026-09-24: on /shorts/<id> the visible slide is
       // ytd-reel-video-renderer, which wraps the (inner) ytd-player/#player
-      // hosts; hiding the slide removes the player, its metadata and the
-      // swipe peek together. Masthead and guide sit outside them.
+      // hosts; ytd-shorts is the whole Shorts view root (slide, metadata,
+      // swipe peek and stage backdrop) and exists only on Shorts routes, so
+      // page mode hides it outright. Masthead and guide sit outside it.
       pagePath: /^\/shorts\/[^/?]+/,
-      pageHide: 'ytd-player, #player, ytd-short-player, ytd-reel-video-renderer',
+      pageHide: 'ytd-player, #player, ytd-short-player, ytd-reel-video-renderer, ytd-shorts',
       items: [
         // Verified 2026-09-24 on search results: lockups are the present-day
         // markup and link relatively (/shorts/<id>).
