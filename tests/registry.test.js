@@ -50,7 +50,7 @@ test('adaptor modules are pure: no browser APIs, classification, or persistence'
 });
 
 test('every adaptor exposes the discovery contract and reserves the optional hooks', () => {
-  for (const adaptor of Object.values(modules)) {
+  for (const adaptor of [xAdaptor, redditAdaptor]) {
     assert.equal(typeof adaptor.id, 'string');
     assert.equal(typeof adaptor.matches, 'function');
     assert.ok(adaptor.candidates.length > 0);
@@ -59,8 +59,8 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
     assert.equal(typeof adaptor.minText, 'function');
     assert.equal(typeof adaptor.eligible, 'function');
     assert.equal(typeof adaptor.container, 'string');
-    // Reserved hooks stay unset this PR: no dialog opt-in, no extra roots, no
-    // observation overrides.
+    // Reserved hooks stay unset on site adaptors: no dialog opt-in, no extra
+    // roots, no observation overrides.
     assert.equal(adaptor.dialogOptIn, undefined);
     assert.equal(adaptor.roots, undefined);
     assert.equal(adaptor.observe, undefined);
@@ -68,15 +68,29 @@ test('every adaptor exposes the discovery contract and reserves the optional hoo
     assert.deepEqual(Object.keys(adaptor).sort(),
       ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'targetOf']);
   }
+  // The generic adaptor opts into open-shadow traversal through the roots
+  // hook (the universal engine); dialog neutrality is expressed by its
+  // exclusion list, not a hook.
+  assert.equal(typeof genericAdaptor.roots, 'function');
+  assert.equal(genericAdaptor.dialogOptIn, undefined);
+  assert.equal(genericAdaptor.observe, undefined);
+  assert.deepEqual(Object.keys(genericAdaptor).sort(),
+    ['candidates', 'container', 'eligible', 'exclude', 'id', 'matches', 'minText', 'roots', 'targetOf']);
 });
 
 test('site adaptors carry the shipped selector and exclusion sets verbatim', () => {
   const shipped = 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]';
   const shippedExclude = 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]';
-  for (const adaptor of Object.values(modules)) {
+  for (const adaptor of [xAdaptor, redditAdaptor]) {
     assert.equal(adaptor.candidates, shipped);
     assert.equal(adaptor.exclude, shippedExclude);
   }
+  // The universal engine evolves the generic adaptor only: the shipped
+  // candidate set stays, and the blanket [role="dialog"] exclusion is dropped
+  // (neutral dialog policy) while every structural chrome exclusion remains.
+  assert.equal(genericAdaptor.candidates, shipped);
+  assert.equal(genericAdaptor.exclude,
+    'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [aria-hidden="true"], [hidden], [data-slop-shield]');
 });
 
 // content.js is injected as a classic script, so it cannot import the adaptor

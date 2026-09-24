@@ -4,11 +4,24 @@
   // SiteAdaptor seam. The canonical modules live in extension/adaptors/ (pure
   // ES modules); content.js is injected as a classic script, so it carries a
   // runtime mirror that tests/registry.test.js keeps honest with them.
+  // Mirrors extension/adaptors/roots.js (canonical open-shadow traversal);
+  // this classic script cannot import the ES module.
+  const collectRoots = (root = document) => {
+    const roots = [root];
+    for (const host of root.querySelectorAll('*'))
+      if (host.shadowRoot) roots.push(...collectRoots(host.shadowRoot));
+    return roots;
+  };
   const genericAdaptor = {
     id: 'generic',
     matches: () => true,
     candidates: 'p, li, blockquote, [data-testid="tweetText"], [data-ad-preview="message"], .md > div, div[dir="auto"]',
-    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="dialog"], [aria-hidden="true"], [hidden], [data-slop-shield]',
+    // Neutral dialog policy: the blanket [role="dialog"] exclusion is dropped
+    // — content dialogs (article lightboxes, comment modals) are candidate
+    // surfaces. Interface chrome stays excluded structurally (forms,
+    // textboxes, contenteditable), so login modals and cookie banners built
+    // on those stay uncovered.
+    exclude: 'nav, header, footer, aside, form, input, textarea, select, button, pre, code, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [aria-hidden="true"], [hidden], [data-slop-shield]',
     // A flagged tweet covers its whole article, including attached images and
     // quoted content. Other page passages keep their individual text covers.
     targetOf: node => node.matches('[data-testid="tweetText"]') ? node.closest('article') || node : node,
@@ -18,7 +31,11 @@
     // Shipped media policy: a candidate holding interactive or media
     // descendants is never scored on its own.
     eligible: node => !node.querySelector('input, textarea, [contenteditable]:not([contenteditable="false"]), img, video, iframe'),
-    container: '[data-testid="tweetText"]'
+    container: '[data-testid="tweetText"]',
+    // Universal-engine opt-in: discovery also scans every reachable OPEN
+    // shadow root (closed roots are unreachable by design). Mirrors the
+    // canonical traversal in extension/adaptors/roots.js above.
+    roots: collectRoots
   };
   const xAdaptor = {
     id: 'x',
@@ -178,7 +195,10 @@
     // Discovery and cached covers continue while DETECT is busy or its budget
     // is exhausted. Feed nodes are temporary; the text score cache is not.
     clean(); pending.clear(); lookupQueue.clear();
-    for (const node of document.querySelectorAll(adaptor.candidates)) {
+    // Roots come from the active adaptor: the document by default, plus every
+    // reachable open shadow root when the adaptor opts in (generic).
+    const scanRoots = adaptor.roots?.() ?? [document];
+    for (const node of scanRoots.flatMap(root => [...root.querySelectorAll(adaptor.candidates)])) {
       // A container candidate swallows its subtree: inner candidates are
       // skipped, and the container is kept even when it wraps other candidates.
       if (adaptor.container && node.closest(adaptor.container) && !node.matches(adaptor.container)) continue;
