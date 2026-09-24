@@ -238,8 +238,8 @@ async function handle(m, sender) {
     const origin = originOf(m.origin);
     if (!origin || origin !== m.origin) throw new Error('Unsupported page.');
     if (m.enabled && !await chrome.permissions.contains({origins: [pattern(origin)]})) throw new Error('Site permission was not granted.');
-    if (m.enabled && !s.apiKey) throw new Error('Add an API key first.');
-    if (m.enabled && !s.filter) throw new Error('Save a blocking instruction in the popup first.');
+    if (m.enabled && !s.shortForm && !s.apiKey) throw new Error('Add an API key first.');
+    if (m.enabled && !s.shortForm && !s.filter) throw new Error('Save a blocking instruction in the popup first.');
     const sites = s.sites.filter(x => x !== origin);
     if (m.enabled) sites.push(origin);
     await persistSettings({sites});
