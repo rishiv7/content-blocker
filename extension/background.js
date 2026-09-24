@@ -3,7 +3,7 @@ import {compileInstruction, normalizeInstruction, COMPILER_VERSION} from './rule
 import {ScoreCache} from './score-cache.js';
 import {RequestLog, redact, responsePreview} from './request-log.js';
 
-const defaults = {apiKey: '', openaiApiKey: '', filter: null, threshold: 0.85, sites: []};
+const defaults = {apiKey: '', openaiApiKey: '', filter: null, threshold: 0.85, sites: [], shortForm: false};
 const ready = chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const sessionReady = chrome.storage.session.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
 const log = new RequestLog({
@@ -35,7 +35,7 @@ const publicSettings = s => ({configured: !!s.apiKey, openaiConfigured: !!s.open
   filterReady: !!s.filter, instruction: s.filter?.instruction || '', filterSummary: s.filter?.summary || '',
   filterId: s.filter?.id || null, threshold: s.threshold, sites: s.sites});
 const publicConfig = (s, origin) => ({configured: !!s.apiKey && !!s.filter, threshold: s.threshold,
-  enabled: s.sites.includes(origin), filterId: s.filter?.id || null, limit: 120});
+  enabled: s.sites.includes(origin), shortForm: !!s.shortForm, filterId: s.filter?.id || null, limit: 120});
 const originOf = (url) => { try { const u = new URL(url); return /^https?:$/.test(u.protocol) ? u.origin : null; } catch { return null; } };
 const trusted = (sender) => sender.id === chrome.runtime.id && sender.url?.startsWith(chrome.runtime.getURL(''));
 const pattern = (origin) => { const u = new URL(origin); return `${u.protocol}//${u.hostname}/*`; };
@@ -226,6 +226,10 @@ async function handle(m, sender) {
       if (m[key] === undefined) continue;
       if (typeof m[key] !== 'string' || m[key].length > 1024 || /\s/.test(m[key])) throw new Error('Enter a valid API key without whitespace.');
       update[key] = m[key];
+    }
+    if (m.shortForm !== undefined) {
+      if (typeof m.shortForm !== 'boolean') throw new Error('Invalid short-form setting.');
+      update.shortForm = m.shortForm;
     }
     if (update.openaiApiKey !== undefined && update.openaiApiKey !== s.openaiApiKey) cancelCompilation();
     await persistSettings(update); return {ok: true};
